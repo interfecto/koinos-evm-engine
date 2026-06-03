@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Koinos EVM — Pool Manager</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="explorer.css" />
+  <link rel="stylesheet" href="pool.css" />
+</head>
+<body>
+  <main class="app-wide">
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo">🦄</span>
+        <div>
+          <h1>Koinos EVM Pool Manager</h1>
+          <p class="sub">Uniswap V3 on Koinos · concentrated liquidity · zero-gas</p>
+        </div>
+      </div>
+      <div class="nav-actions">
+        <a class="navlink" href="index.html">Swap</a>
+        <a class="navlink" href="explorer.html">Explorer</a>
+        <button id="connectBtn" class="btn btn-primary">Connect MetaMask</button>
+      </div>
+    </header>
+
+    <section id="statusCard" class="card status hidden">
+      <div class="status-row"><span class="label">Account</span><code id="account">—</code></div>
+      <div class="status-row"><span class="label">Network</span><span id="network" class="pill">—</span></div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>Pool · TFA / TFB · 0.30%</h2>
+        <button id="refreshPoolBtn" class="btn btn-ghost" title="Refresh pool state">↻</button>
+      </div>
+      <div id="poolState" class="kv2"><div class="empty">Loading pool state…</div></div>
+    </section>
+
+    <section id="balancesCard" class="card hidden">
+      <div class="card-head">
+        <h2>Your balances</h2>
+        <span class="hint">mint test tokens · zero-gas</span>
+      </div>
+      <ul id="balances" class="balances"></ul>
+      <div id="faucetBtns" class="faucet-btns"></div>
+    </section>
+
+    <section id="createCard" class="card hidden">
+      <div class="card-head">
+        <h2>Add liquidity · new position</h2>
+        <span class="hint">NonfungiblePositionManager · concentrated</span>
+      </div>
+      <div class="form-row">
+        <div class="field">
+          <label for="tickLower">Tick lower</label>
+          <input id="tickLower" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="field">
+          <label for="tickUpper">Tick upper</label>
+          <input id="tickUpper" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" />
+        </div>
+      </div>
+      <div class="preset-btns" id="rangePresets" style="margin-top:8px">
+        <span class="chip" data-range="full">Full range</span>
+        <span class="chip" data-range="600">±600 ticks</span>
+        <span class="chip" data-range="3000">±3000 ticks</span>
+        <span class="chip" data-range="60">±60 (1 spacing)</span>
+      </div>
+      <div class="form-row">
+        <div class="field">
+          <label id="amt0Label" for="amount0">amount</label>
+          <input id="amount0" type="text" inputmode="decimal" autocomplete="off" placeholder="0.0" />
+        </div>
+        <div class="field">
+          <label id="amt1Label" for="amount1">amount</label>
+          <input id="amount1" type="text" inputmode="decimal" autocomplete="off" placeholder="0.0" />
+        </div>
+      </div>
+      <p id="createNote" class="form-note">&nbsp;</p>
+      <div class="btn-row">
+        <button id="addLiqBtn" class="btn btn-primary" disabled>Enter an amount</button>
+      </div>
+    </section>
+
+    <section id="positionsCard" class="card hidden">
+      <div class="card-head">
+        <h2>Your positions</h2>
+        <span class="hint">NFT positions · tracked locally</span>
+      </div>
+      <div class="warn-note">
+        Live position liquidity &amp; fees aren't readable on this testnet (Track-T compute
+        limit blocks NFPM <code>positions()</code>). The liquidity shown is tracked in this
+        browser from your mint / increase / decrease transactions.
+      </div>
+      <div id="positionsList"><div class="empty">Connect to see your positions.</div></div>
+    </section>
+
+    <section id="swapCard" class="card hidden">
+      <div class="card-head">
+        <h2>Swap (Uniswap V3)</h2>
+        <span class="hint">SwapRouter · exactInputSingle</span>
+      </div>
+      <div class="form-row">
+        <div class="field">
+          <label id="swapInLabel" for="swapAmtIn">You pay</label>
+          <input id="swapAmtIn" type="text" inputmode="decimal" autocomplete="off" placeholder="0.0" />
+        </div>
+        <div class="field">
+          <label for="swapDir">Direction</label>
+          <select id="swapDir">
+            <option value="0to1"></option>
+            <option value="1to0"></option>
+          </select>
+        </div>
+      </div>
+      <p id="swapNote" class="form-note">&nbsp;</p>
+      <div class="btn-row">
+        <button id="swapGo" class="btn btn-primary" disabled>Enter an amount</button>
+      </div>
+    </section>
+
+    <div id="toast" class="toast hidden"></div>
+    <footer class="foot">
+      Pool <code id="poolFoot">—</code> · chainId 42069 · positions tracked locally (Track-T read limit)
+    </footer>
+  </main>
+  <script type="module" src="pool.js"></script>
+</body>
+</html>

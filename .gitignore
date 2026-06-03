@@ -1,0 +1,28 @@
+# Rust build output
+target/
+# Compiled engine artifact — rebuild from source with engine/build.sh --evm
+*.wasm
+
+# Foundry build output
+out/
+out-*/
+cache/
+broadcast/
+
+# npm deps (the v3-periphery Hardhat build installs these via setup-deps.sh)
+node_modules/
+
+# Tooling/browsing logs
+.gstack/
+
+# OS / editor
+.DS_Store
+*.swp
+*~
+
+# Never commit keys or local env
+*.wallet
+*.key
+*.pem
+.env
+.env.*

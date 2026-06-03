@@ -1,0 +1,18 @@
+[submodule "scripts/forge/lib/openzeppelin-contracts"]
+	path = scripts/forge/lib/openzeppelin-contracts
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts
+[submodule "scripts/forge/lib/v2-core"]
+	path = scripts/forge/lib/v2-core
+	url = https://github.com/Uniswap/v2-core
+[submodule "scripts/forge/lib/v2-periphery"]
+	path = scripts/forge/lib/v2-periphery
+	url = https://github.com/Uniswap/v2-periphery
+[submodule "scripts/forge/lib/solidity-lib"]
+	path = scripts/forge/lib/solidity-lib
+	url = https://github.com/Uniswap/solidity-lib
+[submodule "scripts/forge/lib/v3-core"]
+	path = scripts/forge/lib/v3-core
+	url = https://github.com/Uniswap/v3-core
+[submodule "scripts/forge/lib/v3-periphery"]
+	path = scripts/forge/lib/v3-periphery
+	url = https://github.com/Uniswap/v3-periphery

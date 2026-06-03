@@ -1,0 +1,83 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+optimizer = true
+optimizer_runs = 200
+evm_version = "cancun"
+auto_detect_solc = true
+remappings = [
+  "openzeppelin-contracts/=lib/openzeppelin-contracts/",
+  "@uniswap/v2-core/=lib/v2-core/",
+  "@uniswap/v2-periphery/=lib/v2-periphery/",
+  "@uniswap/lib/=lib/solidity-lib/",
+]
+
+[profile.uniswap]
+src = "uniswap-build"
+out = "out-uniswap"
+libs = ["lib"]
+optimizer = true
+optimizer_runs = 999999
+evm_version = "istanbul"
+auto_detect_solc = true
+remappings = [
+  "@uniswap/v2-core/=lib/v2-core/",
+  "@uniswap/v2-periphery/=lib/v2-periphery/",
+  "@uniswap/lib/=lib/solidity-lib/",
+]
+
+# Uniswap V3. runs=800 + bytecode_hash=none mirrors v3-core's per-file Pool override
+# (the setting that keeps UniswapV3Pool runtime <= 24576). Applied project-wide here
+# since forge has no per-file runs; Factory/libs are unaffected by the lower runs.
+[profile.v3]
+src = "v3-build"
+out = "out-v3"
+libs = ["lib"]
+optimizer = true
+optimizer_runs = 800
+bytecode_hash = "none"
+evm_version = "istanbul"
+auto_detect_solc = true
+remappings = [
+  "@uniswap/v3-core/=lib/v3-core/",
+  "@uniswap/v3-periphery/=lib/v3-periphery/",
+]
+
+# Uniswap V3 PERIPHERY (real SwapRouter / Quoter / NonfungiblePositionManager). Uses the
+# periphery's OWN pinned deps via its node_modules (OZ 3.4.1-solc-0.7, v3-core 1.0.0, base64-sol),
+# because our top-level OZ submodule is 5.x (solc 0.8+) and incompatible with periphery's 0.7.6.
+[profile.v3p]
+src = "v3p-build"
+out = "out-v3p"
+libs = ["lib"]
+optimizer = true
+optimizer_runs = 1000000
+bytecode_hash = "none"
+evm_version = "istanbul"
+auto_detect_solc = true
+remappings = [
+  "@uniswap/v3-periphery/=lib/v3-periphery/",
+  "@uniswap/v3-core/=lib/v3-periphery/node_modules/@uniswap/v3-core/",
+  "@openzeppelin/contracts/=lib/v3-periphery/node_modules/@openzeppelin/contracts/",
+  "base64-sol/=lib/v3-periphery/node_modules/base64-sol/",
+]
+
+# NonfungiblePositionManager needs LOW optimizer runs to fit under EIP-170 (24576): at runs=1000000
+# its runtime is 28653 B (rejected on deploy); runs=2000 -> 24384 B, matching the canonical periphery
+# per-file override. Separate profile so SwapRouter/Quoter keep runs=1000000.
+[profile.v3pn]
+src = "v3p-nfpm-build"
+out = "out-v3pn"
+libs = ["lib"]
+optimizer = true
+optimizer_runs = 2000
+bytecode_hash = "none"
+evm_version = "istanbul"
+auto_detect_solc = true
+remappings = [
+  "@uniswap/v3-periphery/=lib/v3-periphery/",
+  "@uniswap/v3-core/=lib/v3-periphery/node_modules/@uniswap/v3-core/",
+  "@openzeppelin/contracts/=lib/v3-periphery/node_modules/@openzeppelin/contracts/",
+  "base64-sol/=lib/v3-periphery/node_modules/base64-sol/",
+]

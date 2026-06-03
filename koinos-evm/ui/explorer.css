@@ -1,0 +1,98 @@
+/* Explorer-specific styles. Loaded AFTER styles.css; reuses its design tokens. */
+
+.app-wide {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 28px 18px 60px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.navlink {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  text-decoration: none;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  border-radius: 10px;
+  padding: 8px 14px;
+}
+.navlink:hover { filter: brightness(1.15); }
+
+.feed-status { display: flex; align-items: center; gap: 10px; }
+.dot {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--accent-2); box-shadow: 0 0 0 0 rgba(56,211,159,.5);
+}
+.dot.live { animation: pulse 1.8s infinite; }
+.dot.err { background: var(--danger); }
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(56,211,159,.45); }
+  70% { box-shadow: 0 0 0 7px rgba(56,211,159,0); }
+  100% { box-shadow: 0 0 0 0 rgba(56,211,159,0); }
+}
+
+/* Decode box */
+.decode-row { display: flex; gap: 10px; flex-wrap: wrap; }
+.decode-row input {
+  flex: 1 1 320px; min-width: 0;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px;
+  padding: 11px 13px; color: var(--text); font: inherit;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px;
+}
+.decode-row input::placeholder { color: var(--muted); }
+
+/* Activity table */
+.feed { width: 100%; border-collapse: collapse; font-size: 13px; }
+.feed th {
+  text-align: left; color: var(--muted); font-weight: 600; font-size: 11px;
+  text-transform: uppercase; letter-spacing: .5px;
+  padding: 8px 10px; border-bottom: 1px solid var(--border);
+}
+.feed td { padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.feed tr.row { cursor: pointer; transition: background .12s ease; }
+.feed tr.row:hover { background: var(--panel-2); }
+.feed tr.detail-row > td { background: var(--panel-2); padding: 0; }
+
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.addr { color: var(--text); }
+.addr .tag { color: var(--accent); }
+.method-pill {
+  display: inline-block; font-size: 12px; font-weight: 600;
+  padding: 3px 9px; border-radius: 999px;
+  background: rgba(91,140,255,.12); color: var(--accent); border: 1px solid rgba(91,140,255,.3);
+  white-space: nowrap;
+}
+.method-pill.unknown { background: rgba(138,150,173,.12); color: var(--muted); border-color: var(--border); }
+.method-pill.create { background: rgba(56,211,159,.12); color: var(--accent-2); border-color: rgba(56,211,159,.3); }
+
+.status-ok { color: var(--accent-2); }
+.status-fail { color: var(--danger); }
+.arrow { color: var(--muted); padding: 0 4px; }
+.val-num { font-variant-numeric: tabular-nums; }
+.muted { color: var(--muted); }
+.empty-feed { text-align: center; color: var(--muted); padding: 30px 0; }
+
+/* Detail panel */
+.detail { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+.detail h3 { margin: 0 0 4px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+.kv { display: grid; grid-template-columns: 150px 1fr; gap: 6px 14px; font-size: 13px; }
+.kv .k { color: var(--muted); }
+.kv .v { color: var(--text); word-break: break-all; }
+.kv .v a { color: var(--accent); }
+.codeblock {
+  background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+  padding: 10px 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px; white-space: pre-wrap; word-break: break-all; color: var(--text);
+}
+.log-item { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: var(--bg); }
+.log-item + .log-item { margin-top: 8px; }
+.log-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; }
+.ev-pill {
+  font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px;
+  background: rgba(56,211,159,.12); color: var(--accent-2); border: 1px solid rgba(56,211,159,.3);
+}
+.links-row { display: flex; gap: 14px; flex-wrap: wrap; font-size: 13px; }
+.links-row a { color: var(--accent); }

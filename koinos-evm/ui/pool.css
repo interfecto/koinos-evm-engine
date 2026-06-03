@@ -1,0 +1,50 @@
+/* Pool-manager styles. Loaded after styles.css + explorer.css; reuses their tokens. */
+
+.nav-actions { display: flex; align-items: center; gap: 10px; }
+
+.kv2 { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; font-size: 13px; }
+.kv2 .k { color: var(--muted); }
+.kv2 .v { color: var(--text); font-variant-numeric: tabular-nums; word-break: break-all; }
+.kv2 .v.mono, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.big { font-size: 20px; font-weight: 600; }
+
+.faucet-btns { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+.faucet-btns .btn { flex: 1 1 150px; }
+
+/* Forms (create position / swap) */
+.form-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; margin-top: 10px; }
+.field { display: flex; flex-direction: column; gap: 5px; flex: 1 1 150px; min-width: 0; }
+.field label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+.field input, .field select {
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px;
+  padding: 10px 12px; color: var(--text); font: inherit; font-size: 15px;
+  font-variant-numeric: tabular-nums; min-width: 0;
+}
+.field input::placeholder { color: var(--muted); }
+.field input:disabled, .field select:disabled { opacity: .5; }
+.btn-row { display: flex; gap: 10px; margin-top: 12px; }
+.btn-row .btn { flex: 1; }
+.form-note { font-size: 12px; color: var(--muted); margin: 8px 2px 0; min-height: 14px; }
+.preset-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip {
+  font-size: 12px; padding: 4px 10px; border-radius: 999px; cursor: pointer;
+  background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+}
+.chip:hover { filter: brightness(1.15); }
+.chip.active { background: rgba(91,140,255,.15); border-color: var(--accent); color: var(--accent); }
+
+/* Position list */
+.pos { border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; background: var(--panel-2); }
+.pos + .pos { margin-top: 10px; }
+.pos-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pos-id { font-weight: 600; }
+.pos-range { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.pos-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.pos-actions .btn { padding: 7px 12px; font-size: 13px; }
+.in-range { color: var(--accent-2); }
+.out-range { color: var(--danger); }
+.warn-note {
+  font-size: 12px; color: var(--muted); background: rgba(255,107,107,.07);
+  border: 1px solid rgba(255,107,107,.2); border-radius: 10px; padding: 8px 11px; margin-top: 10px;
+}
+.empty { color: var(--muted); font-size: 13px; padding: 8px 0; }

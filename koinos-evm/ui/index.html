@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Koinos EVM — Swap Demo</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo">⚡</span>
+        <div>
+          <h1>Koinos EVM Swap</h1>
+          <p class="sub">Uniswap V2 on the Koinos EVM testnet · zero-gas</p>
+        </div>
+      </div>
+      <button id="connectBtn" class="btn btn-primary">Connect MetaMask</button>
+    </header>
+
+    <section id="statusCard" class="card status hidden">
+      <div class="status-row"><span class="label">Account</span><code id="account">—</code></div>
+      <div class="status-row"><span class="label">Network</span><span id="network" class="pill">—</span></div>
+    </section>
+
+    <section id="balancesCard" class="card hidden">
+      <div class="card-head">
+        <h2>Balances</h2>
+        <button id="refreshBtn" class="btn btn-ghost" title="Refresh balances">↻</button>
+      </div>
+      <ul id="balances" class="balances"></ul>
+    </section>
+
+    <section id="faucetCard" class="card hidden">
+      <div class="card-head">
+        <h2>Faucet</h2>
+        <span class="hint">mint test tokens · zero-gas</span>
+      </div>
+      <div id="faucetBtns" class="faucet-btns"></div>
+    </section>
+
+    <section id="swapCard" class="card hidden">
+      <div class="card-head">
+        <h2>Swap</h2>
+        <span class="hint">slippage 0.5%</span>
+      </div>
+      <div class="swap-row">
+        <input id="amountIn" class="amount" type="text" inputmode="decimal" autocomplete="off" placeholder="0.0" />
+        <select id="tokenIn" class="token-sel"></select>
+      </div>
+      <div class="swap-sub">
+        <span>Balance: <span id="balIn">—</span></span>
+        <button id="maxBtn" class="link-btn" type="button">Max</button>
+      </div>
+      <div class="swap-flip"><button id="flipBtn" class="btn btn-ghost" title="Flip direction">↓</button></div>
+      <div class="swap-row">
+        <input id="amountOut" class="amount" type="text" placeholder="0.0" readonly tabindex="-1" />
+        <select id="tokenOut" class="token-sel"></select>
+      </div>
+      <div class="swap-sub">
+        <span>Balance: <span id="balOut">—</span></span>
+      </div>
+      <p id="swapMeta" class="swap-meta">&nbsp;</p>
+      <button id="swapBtn" class="btn btn-primary swap-btn" disabled>Enter an amount</button>
+    </section>
+
+    <div id="toast" class="toast hidden"></div>
+    <footer class="foot">RPC <code>http://localhost:8545</code> · chainId 42069 · <a href="pool.html" style="color:var(--accent)">V3 Pools →</a> · <a href="explorer.html" style="color:var(--accent)">Explorer →</a></footer>
+  </main>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

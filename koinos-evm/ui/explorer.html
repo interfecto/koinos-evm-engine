@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Koinos EVM — Explorer</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="explorer.css" />
+</head>
+<body>
+  <main class="app-wide">
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo">🔎</span>
+        <div>
+          <h1>Koinos EVM Explorer</h1>
+          <p class="sub">EVM activity on the Koinos foundation testnet · decoded live</p>
+        </div>
+      </div>
+      <span style="display:flex;gap:10px">
+        <a class="navlink" href="index.html">← Swap</a>
+        <a class="navlink" href="pool.html">V3 Pools</a>
+      </span>
+    </header>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>Decode a transaction</h2>
+        <span class="hint">Koinos tx id (0x1220…) or EVM tx hash</span>
+      </div>
+      <div class="decode-row">
+        <input id="decodeInput" type="text" autocomplete="off" spellcheck="false"
+               placeholder="0x1220…  (Koinos tx id)  or  0x…64hex  (EVM hash, recent only)" />
+        <button id="decodeBtn" class="btn btn-primary">Decode</button>
+      </div>
+      <div id="decodeResult"></div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>Recent EVM activity</h2>
+        <div class="feed-status">
+          <span id="feedDot" class="dot"></span>
+          <span id="feedInfo" class="hint">connecting…</span>
+        </div>
+      </div>
+      <table class="feed">
+        <thead>
+          <tr>
+            <th>Seq</th>
+            <th>From → To</th>
+            <th>Method</th>
+            <th>Value</th>
+            <th>Status</th>
+            <th>EVM hash</th>
+          </tr>
+        </thead>
+        <tbody id="feedBody">
+          <tr><td colspan="6" class="empty-feed">Loading recent activity…</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <footer class="foot">
+      Reads <code>testnet.koinosfoundation.org</code> directly · engine
+      <code id="engineFoot">1E8igxy…</code> · chainId 42069
+    </footer>
+  </main>
+  <script type="module" src="explorer.js"></script>
+</body>
+</html>

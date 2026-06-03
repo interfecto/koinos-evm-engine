@@ -1,0 +1,35 @@
+[package]
+name = "koinos-evm-engine"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[features]
+default = []
+evm = ["dep:revm", "dep:alloy-rlp"]
+# DANGEROUS: re-enables handle_execute / handle_deploy_code that trust the protobuf `caller`
+# field. Allows any Koinos caller to impersonate any EVM address. ONLY for local devnet testing
+# before submit_raw_tx lands. Never enable in a build deployed to mainnet/testnet.
+dev_unsafe_caller = ["evm"]
+
+[dependencies]
+# EVM interpreter - optional, enabled with "evm" feature
+revm = { version = "19", default-features = false, optional = true }
+
+# RLP codec for Ethereum raw transaction decoding (no_std compatible)
+alloy-rlp = { version = "0.3", default-features = false, optional = true }
+
+# Lightweight allocator for WASM
+dlmalloc = { version = "0.2", features = ["global"] }
+
+[profile.release]
+opt-level = "z"        # Optimize for size
+lto = true             # Link-time optimization
+codegen-units = 1      # Single codegen unit for better optimization
+panic = "abort"        # No unwinding in WASM
+strip = true           # Strip symbols
+
+[profile.release.package."*"]
+opt-level = "z"

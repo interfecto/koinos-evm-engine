@@ -1,0 +1,13 @@
+diff --git a/contracts/libraries/UniswapV2Library.sol b/contracts/libraries/UniswapV2Library.sol
+index 107fb2e..aee4349 100644
+--- a/contracts/libraries/UniswapV2Library.sol
++++ b/contracts/libraries/UniswapV2Library.sol
+@@ -21,7 +21,7 @@ library UniswapV2Library {
+                 hex'ff',
+                 factory,
+                 keccak256(abi.encodePacked(token0, token1)),
+-                hex'96e8ac4277198ff8b6f785478aa9a39f403cb768dd02cbee326c3e7da348845f' // init code hash
++                hex'b98abe7bf8374af01c3063a99b90a451a187a0265bf85c90d1e06de0600f142c' // init code hash (our local Pair, istanbul + opt-runs=999999)
+             ))));
+     }
+ 

@@ -1,0 +1,40 @@
+[package]
+name = "koinos-evm-rpc"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "koinos-evm-rpc"
+path = "src/main.rs"
+
+[dependencies]
+# HTTP + JSON-RPC
+axum = "0.7"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tower = "0.5"
+tower-http = { version = "0.5", features = ["cors"] }
+
+# JSON + serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Async HTTP client (for talking to Koinos REST + JSON-RPC)
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# Crypto for signing Koinos txs
+secp256k1 = { version = "0.30", features = ["recovery", "rand"] }
+sha2 = "0.10"
+ripemd = "0.1"
+sha3 = "0.10"  # for keccak256 (Ethereum tx hash)
+
+# Encoding
+hex = "0.4"
+base64 = "0.22"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
