@@ -60,6 +60,25 @@ RC_LIMIT_MANA=1500000000 \
 `RC_LIMIT_MANA=1500000000` is enough for large deploys (a 22 KB pool CREATE2 ≈ 0.26e9 mana). The
 default 200M is too low for contract deploys.
 
+### Proxy hardening / persistence knobs (all optional, sensible defaults)
+
+| Env | Default | Meaning |
+|---|---|---|
+| `DB_PATH` | `./koinos-evm-rpc.sqlite` | Durable SQLite store for txs + receipts/logs/blocks. Makes `eth_getTransactionReceipt`/`ByHash` restart-safe and backs `eth_getLogs` + block bodies. Delete the file to reset (the indexer rebuilds it from chain). |
+| `RECEIPT_POLL_SECS` | `3` | Background poller that settles pending receipts into the store (0 = off). |
+| `INDEXER_POLL_SECS` / `INDEXER_PAGE_SIZE` | `3` / `50` | Account-history backfill indexer: on first start it indexes the engine's ENTIRE history (any relayer), then tails the head with block-global log indexes. 0 secs = off. |
+| `WS_POLL_SECS` | `2` | WebSocket push feeds (`eth_subscribe` newHeads + logs). 0 = pushes off (the WS endpoint still answers regular JSON-RPC). |
+| `ESTIMATE_GAS_FALLBACK` | `5000000` | Gas returned by `eth_estimateGas` when the estimation view hits the node's read-compute limit (`-1013`), which happens for ALL writes on a default public node. 0 = disable (error propagates). Harmless to over-estimate: users pay zero gas and relay mana is independent of this figure. |
+| `CORS_ALLOWED_ORIGINS` | localhost:8080/3000 | Comma-separated browser-origin allowlist; `"*"` restores fully-permissive CORS (dev only). |
+| `RATE_LIMIT_RPS` / `RATE_LIMIT_BURST` | `50` / `500` | Per-client-IP token bucket; one token per JSON-RPC request, batches cost their length (0 rps = off). Defaults are generous because all loopback clients share one bucket. |
+| `TRUST_PROXY_HEADERS` | `0` (off) | For deployments behind a reverse proxy ON THE SAME HOST: when the TCP peer is loopback, the rate limiter keys on `X-Real-IP` (set by your proxy) or the last `X-Forwarded-For` hop instead of the peer address — otherwise every visitor shares one bucket. Non-loopback peers always keep their TCP address (headers are forgeable on direct connections). Never enable without a trusted proxy in front. |
+| `RPC_MAX_BATCH` / `RPC_MAX_BODY_BYTES` | `100` / `1048576` | JSON-RPC batch-size and HTTP body-size caps. |
+| `MIN_GAS_PRICE_WEI` | `0` (off) | Admission floor on the sender-committed gas price (legacy `gas_price` / 1559 `max_fee_per_gas`). The engine still charges 0 ETH — this is an anti-spam gate; `eth_gasPrice`/`eth_feeHistory` advertise the floor so wallets auto-comply. |
+| `NONCE_RECONCILE_SECS` | `30` | Periodic operator-nonce reconcile against chain (0 = off; error-triggered resync stays on). |
+| `TX_META_MAX` / `TX_META_TTL_SECS` | `10000` / `3600` | In-memory tx-metadata cache bound (hot path in front of the SQLite store). |
+| `PENDING_NONCE_MAX` / `PENDING_NONCE_TTL_SECS` | `10000` / `600` | Per-sender pending-nonce map bound; the TTL also heals stale too-high entries. |
+| `GETLOGS_MAX_BLOCK_RANGE` / `GETLOGS_MAX_RESULTS` | `10000` / `10000` | `eth_getLogs` caps; exceeding either returns `-32005` so clients auto-chunk. |
+
 ## 5. Deploy contracts
 
 All deploy scripts take an EVM deployer key via `DEPLOYER_PK` (0x-prefixed) and target the proxy at
@@ -81,6 +100,55 @@ DEPLOYER_PK=<deployer-key> RPC=http://localhost:8545 ./scripts/shell/deploy_v3_f
 
 After deploying, paste the printed addresses into `koinos-evm/ui/config.js` so the UIs point at your
 deployment.
+
+## 6. Public exposure (TLS reverse proxy)
+
+The proxy binds loopback by default and should STAY on loopback in public deployments — terminate
+TLS with a reverse proxy on the same host and forward to it. MetaMask requires `https://` RPC URLs
+for non-localhost networks, and the same endpoint serves WebSocket (`eth_subscribe`) on GET, so the
+proxy block must pass upgrade headers. Minimal nginx example:
+
+```nginx
+# http context (e.g. conf.d/ws-upgrade.conf)
+map $http_upgrade $connection_upgrade { default upgrade; '' close; }
+
+# inside your TLS server block
+location = /evm-rpc {
+    limit_req zone=your_zone burst=40 nodelay;     # edge rate limit (defense in depth)
+    proxy_pass http://127.0.0.1:8545/;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $connection_upgrade;
+    proxy_set_header X-Real-IP $remote_addr;        # pairs with TRUST_PROXY_HEADERS=1
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_read_timeout 3600s;                       # long-lived WS subscriptions
+}
+```
+
+Required env for the proxy behind that block:
+
+```bash
+TRUST_PROXY_HEADERS=1                                   # per-IP limiting sees real client IPs
+CORS_ALLOWED_ORIGINS=https://your.site,https://www.your.site
+```
+
+The bundled UIs are origin-aware: served from any non-localhost origin they call
+`{origin}/evm-rpc` (and derive `wss://` for the live feeds) instead of `http://localhost:8545`,
+so the same static files work locally and deployed.
+
+**Public-node read limits.** If the proxy points at a default public Koinos node instead of your own
+raised-read-limit node, heavy `eth_call` views fail with `-32005` (the node caps read compute at
+~10M). Writes, light reads, `eth_getLogs` (served from the proxy's own index), and the WS feeds are
+unaffected — the quest page even rebuilds its canvas from event replay when the heavy view is
+unavailable. Run your own node with `read-compute-bandwidth-limit` raised if you need Quoter /
+`positions()` / other heavy views.
+
+**Operator-key hygiene.** Exactly ONE proxy instance should relay per operator key — concurrent
+relays race on the operator's Koinos nonce (each submit self-heals via resync-retry, but
+simultaneous submitters will see intermittent failures). Keep the key in a root-only env file
+(`chmod 600`), run the service sandboxed (`ProtectSystem=strict`, `MemoryMax=`), and remember the
+mempool reserves the full `RC_LIMIT_MANA` per pending tx until irreversibility (~3 min): burst
+capacity ≈ operator mana ÷ `RC_LIMIT_MANA`.
 
 ## Notes / gotchas
 

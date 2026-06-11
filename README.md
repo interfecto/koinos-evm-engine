@@ -24,7 +24,8 @@ The pattern is "**EVM-as-a-contract + relay**" (the same approach Aurora uses on
 
 - **The engine** is `revm` compiled to MVP WebAssembly and deployed as one ~407 KB Koinos contract.
   It decodes signed Ethereum transactions, recovers the sender via `ecrecover`, and executes through
-  revm (CREATE/CREATE2, cross-contract calls preserving `msg.sender`, 4 precompiles) — validated
+  revm (CREATE/CREATE2, cross-contract calls preserving `msg.sender`, precompiles 0x01–0x09 —
+  0x01–0x04 via Koinos syscalls, 0x05–0x09 via revm's bundled Cancun set) — validated
   byte-exact for the exercised Uniswap V2/V3 paths, not a blanket Ethereum-equivalence claim (see
   [docs/STATUS.md](docs/STATUS.md)). EVM accounts/code/storage live in the contract's Koinos KV space;
   EVM logs become Koinos events.
