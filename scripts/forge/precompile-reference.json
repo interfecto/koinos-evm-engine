@@ -1,0 +1,59 @@
+{
+  "_meta": {
+    "contract": "scripts/forge/src/PrecompileProbe.sol",
+    "event": "ProbeResult(uint8,uint16,bool,bytes)",
+    "note": "0x0a is informational: engine has revm's fatal 0x0a stub (no c-kzg); anvil fails the invalid input inside the staticcall instead.",
+    "reference": "anvil (foundry), chain-id 42069, EIP test vectors asserted"
+  },
+  "results": {
+    "0x02:1": {
+      "output": "0xba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+      "success": true
+    },
+    "0x03:1": {
+      "output": "0x0000000000000000000000008eb208f7e05d987a9b044a8e98c6b087f15a0bfc",
+      "success": true
+    },
+    "0x04:1": {
+      "output": "0x4b6f696e6f732045564d20707265636f6d70696c65206964656e746974792070726f6265",
+      "success": true
+    },
+    "0x05:1": {
+      "output": "0x0000000000000000000000000000000000000000000000000000000000000004",
+      "success": true
+    },
+    "0x05:2": {
+      "output": "0x671fda505b8b5d4e7a0436765556e7133b89742658a86f57cb00666b06198a0f4f79cd764b6c614760e5ddfda3e686291a35548d4edf38f61e789a7425081213",
+      "success": true
+    },
+    "0x06:1": {
+      "output": "0x2243525c5efd4b9c3d3c45ac0ca3fe4dd85e830a4ce6b65fa1eeaee202839703301d1d33be6da8e509df21cc35964723180eed7532537db9ae5e7d48f195c915",
+      "success": true
+    },
+    "0x07:1": {
+      "output": "0x070a8d6a982153cae4be29d434e8faef8a47b274a053f5a4ee2a6c9c13c31e5c031b8ce914eba3a9ffb989f9cdd5b0f01943074bf4f0f315690ec3cec6981afc",
+      "success": true
+    },
+    "0x08:1": {
+      "output": "0x0000000000000000000000000000000000000000000000000000000000000001",
+      "success": true
+    },
+    "0x08:2": {
+      "output": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "success": true
+    },
+    "0x08:3": {
+      "output": "0x0000000000000000000000000000000000000000000000000000000000000001",
+      "success": true
+    },
+    "0x09:1": {
+      "output": "0xba80a53f981c4d0d6a2797b69f12f6e94c212f14685ac4b74b12bb6fdbffa2d17d87c5392aab792dc252d5de4533cc9518d38aa8dbf1925ab92386edd4009923",
+      "success": true
+    },
+    "0x0a:1": {
+      "informational": true,
+      "output": "0x",
+      "success": false
+    }
+  }
+}
