@@ -6,7 +6,7 @@
 //!   - Account result: `{ uint64 nonce=1, bytes balance=2 (32 BE), bytes code_hash=3 (32) }`
 //!   - EvmResult: `{ bool success=1, bytes output=2, uint64 gas_used=3, bytes contract_address=4 }`
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Result, anyhow};
 
 // ── Varint ──────────────────────────────────────────────────────────────
 
@@ -135,10 +135,8 @@ pub fn decode_account(bytes: &[u8]) -> Result<Option<EvmAccount>> {
                     acc.balance.copy_from_slice(f.payload);
                 }
             }
-            (3, 2) => {
-                if f.payload.len() == 32 {
-                    acc.code_hash.copy_from_slice(f.payload);
-                }
+            (3, 2) if f.payload.len() == 32 => {
+                acc.code_hash.copy_from_slice(f.payload);
             }
             _ => {}
         }
@@ -164,12 +162,10 @@ pub fn decode_evm_result(bytes: &[u8]) -> Result<EvmResult> {
             (1, 0) => r.success = f.varint != 0,
             (2, 2) => r.output = f.payload.to_vec(),
             (3, 0) => r.gas_used = f.varint,
-            (4, 2) => {
-                if f.payload.len() == 20 {
-                    let mut a = [0u8; 20];
-                    a.copy_from_slice(f.payload);
-                    r.contract_address = Some(a);
-                }
+            (4, 2) if f.payload.len() == 20 => {
+                let mut a = [0u8; 20];
+                a.copy_from_slice(f.payload);
+                r.contract_address = Some(a);
             }
             _ => {}
         }
@@ -221,7 +217,7 @@ pub fn build_call_view_args(args: &CallViewArgs<'_>) -> Vec<u8> {
         write_bytes_field(&mut out, 4, args.data);
     }
     if args.gas_limit > 0 {
-        let tag = (5u32 << 3) | 0;
+        let tag = 5u32 << 3;
         write_varint(&mut out, tag as u64);
         write_varint(&mut out, args.gas_limit);
     }

@@ -8,7 +8,7 @@
 use anyhow::{Context, Result};
 use base64::Engine;
 use reqwest::Client;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// Decode base64 leniently — accepts both std and URL-safe alphabets, with/without padding.
 /// Koinos JSON often uses URL-safe-without-padding.
@@ -17,7 +17,8 @@ pub fn decode_b64_lax(s: &str) -> Result<Vec<u8>> {
         return Ok(Vec::new());
     }
     // Try URL-safe no-pad first (Koinos default), then standard with pad
-    if let Ok(v) = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(s.trim_end_matches('=')) {
+    if let Ok(v) = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(s.trim_end_matches('='))
+    {
         return Ok(v);
     }
     if let Ok(v) = base64::engine::general_purpose::STANDARD.decode(s) {
@@ -110,10 +111,7 @@ impl KoinosClient {
             )
             .await?;
         // Response shape: { "result": "<base64 bytes>", "logs": [...] }
-        let result_b64 = resp
-            .get("result")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let result_b64 = resp.get("result").and_then(|v| v.as_str()).unwrap_or("");
         // Koinos uses URL-safe base64 (no padding) in JSON
         decode_b64_lax(result_b64)
     }
@@ -132,19 +130,15 @@ impl KoinosClient {
 
     /// `chain.get_account_nonce` — get the current nonce for an account.
     pub async fn get_account_nonce(&self, account_b64: &str) -> Result<Value> {
-        self.rpc(
-            "chain.get_account_nonce",
-            json!({ "account": account_b64 }),
-        )
-        .await
+        self.rpc("chain.get_account_nonce", json!({ "account": account_b64 }))
+            .await
     }
 
     /// `chain.get_account_rc` — get the account's mana balance.
+    /// Not called yet; needed for the reserved-mana backpressure check (ROADMAP §4 step 5).
+    #[allow(dead_code)]
     pub async fn get_account_rc(&self, account_b64: &str) -> Result<Value> {
-        self.rpc(
-            "chain.get_account_rc",
-            json!({ "account": account_b64 }),
-        )
-        .await
+        self.rpc("chain.get_account_rc", json!({ "account": account_b64 }))
+            .await
     }
 }

@@ -54,7 +54,7 @@ fn encode_varint(out: &mut Vec<u8>, mut n: u64) {
 }
 
 fn write_uint64_field(out: &mut Vec<u8>, field: u32, value: u64) {
-    let tag = (field << 3) | 0;
+    let tag = field << 3;
     encode_varint(out, tag as u64);
     encode_varint(out, value);
 }
@@ -81,13 +81,6 @@ pub fn sha256_multihash(data: &[u8]) -> Vec<u8> {
     out.push(MULTICODEC_SHA2_256);
     out.push(0x20);
     out.extend_from_slice(&hash);
-    out
-}
-
-/// Just the 32-byte SHA-256 digest, no multihash framing.
-pub fn sha256_raw(data: &[u8]) -> [u8; 32] {
-    let mut out = [0u8; 32];
-    out.copy_from_slice(&Sha256::digest(data));
     out
 }
 
@@ -196,7 +189,8 @@ pub struct RelayedTx {
     pub operation_merkle_root: Vec<u8>,
     /// Compact Koinos signature `[31+y_parity, r, s]`. 65 bytes.
     pub signature: Vec<u8>,
-    /// The single operation's serialized bytes (for re-rendering as JSON).
+    /// The single operation's serialized bytes (kept for debug re-rendering as JSON).
+    #[allow(dead_code)]
     pub operation_bytes: Vec<u8>,
 }
 
@@ -205,6 +199,7 @@ pub struct RelayedTx {
 ///
 /// `payer_20` is the operator's 20-byte hash160 address.
 /// `nonce` is the OPERATOR's next-tx nonce (NOT the EVM sender's nonce).
+#[allow(clippy::too_many_arguments)] // mirrors the Koinos tx-header field list 1:1
 pub fn build_relayed_tx(
     chain_id_multihash: &[u8],
     rc_limit: u64,

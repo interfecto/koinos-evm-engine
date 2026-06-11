@@ -3,7 +3,7 @@
 //! We don't validate the signature here — the engine does that on submit_raw_tx. We just
 //! decode the RLP envelope so we can answer eth_getTransactionByHash with the right fields.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use sha3::{Digest, Keccak256};
 
 #[derive(Debug, Clone)]
@@ -15,6 +15,11 @@ pub struct DecodedTx {
     pub value: [u8; 32],
     pub data: Vec<u8>,
     pub gas_limit: u64,
+    /// The price the sender committed to pay per gas, 32-byte BE:
+    /// legacy `gas_price`, or EIP-1559 `max_fee_per_gas`. The engine charges 0
+    /// regardless (zero-fee policy) — this is used for the relay's admission floor
+    /// (MIN_GAS_PRICE_WEI) and for eth_getTransactionByHash fidelity.
+    pub gas_price: [u8; 32],
     pub from: [u8; 20],
     pub r: [u8; 32],
     pub s: [u8; 32],
@@ -47,15 +52,29 @@ impl<'a> RlpReader<'a> {
         if !list {
             return Err(anyhow!("expected RLP list"));
         }
-        let payload = &buf[payload_start..payload_start + payload_len];
+        let payload_end = payload_start
+            .checked_add(payload_len)
+            .ok_or_else(|| anyhow!("RLP list length overflow"))?;
+        if payload_end > buf.len() {
+            return Err(anyhow!("RLP list payload truncated"));
+        }
+        let payload = &buf[payload_start..payload_end];
         let mut items = Vec::new();
         let mut pos = 0;
         while pos < payload.len() {
             let item_start = pos;
             let (_is_list, item_payload_len, item_payload_start) = rlp_header(&payload[pos..])?;
-            let total_len = item_payload_start + item_payload_len;
-            items.push(&payload[item_start..item_start + total_len]);
-            pos += total_len;
+            let total_len = item_payload_start
+                .checked_add(item_payload_len)
+                .ok_or_else(|| anyhow!("RLP item length overflow"))?;
+            let item_end = item_start
+                .checked_add(total_len)
+                .ok_or_else(|| anyhow!("RLP item length overflow"))?;
+            if item_end > payload.len() {
+                return Err(anyhow!("RLP item truncated"));
+            }
+            items.push(&payload[item_start..item_end]);
+            pos = item_end;
         }
         Ok(Self { items })
     }
@@ -110,15 +129,22 @@ fn rlp_decode_bytes(buf: &[u8]) -> Result<&[u8]> {
     }
     // Single-byte case: when b <= 0x7f, the byte IS the value
     if buf[0] <= 0x7f {
-        Ok(&buf[..1])
-    } else {
-        Ok(&buf[payload_start..payload_start + payload_len])
+        return Ok(&buf[..1]);
     }
+    let payload_end = payload_start
+        .checked_add(payload_len)
+        .ok_or_else(|| anyhow!("RLP bytes length overflow"))?;
+    if payload_end > buf.len() {
+        return Err(anyhow!("RLP bytes truncated"));
+    }
+    Ok(&buf[payload_start..payload_end])
 }
 
 fn decode_u64(item: &[u8]) -> Result<u64> {
-    let b = rlp_decode_bytes(item)?;
-    let bytes = if !b.is_empty() && item[0] <= 0x7f { b } else { b };
+    let bytes = rlp_decode_bytes(item)?;
+    if bytes.len() > 8 {
+        return Err(anyhow!("integer > 8 bytes"));
+    }
     let mut out = 0u64;
     for &x in bytes {
         out = (out << 8) | x as u64;
@@ -160,7 +186,7 @@ fn keccak256(data: &[u8]) -> [u8; 32] {
 fn decode_legacy(raw: &[u8]) -> Result<DecodedTx> {
     let reader = RlpReader::from_list(raw)?;
     let nonce = decode_u64(reader.item(0)?)?;
-    let _gas_price = rlp_decode_bytes(reader.item(1)?)?;
+    let gas_price = decode_u256_be(reader.item(1)?)?;
     let gas_limit = decode_u64(reader.item(2)?)?;
     let to = decode_address(reader.item(3)?)?;
     let value = decode_u256_be(reader.item(4)?)?;
@@ -198,6 +224,7 @@ fn decode_legacy(raw: &[u8]) -> Result<DecodedTx> {
         value,
         data,
         gas_limit,
+        gas_price,
         from,
         r,
         s,
@@ -231,7 +258,7 @@ fn decode_eip1559(payload: &[u8]) -> Result<DecodedTx> {
     let chain_id = decode_u64(reader.item(0)?)?;
     let nonce = decode_u64(reader.item(1)?)?;
     let _max_priority = rlp_decode_bytes(reader.item(2)?)?;
-    let _max_fee = rlp_decode_bytes(reader.item(3)?)?;
+    let max_fee = decode_u256_be(reader.item(3)?)?;
     let gas_limit = decode_u64(reader.item(4)?)?;
     let to = decode_address(reader.item(5)?)?;
     let value = decode_u256_be(reader.item(6)?)?;
@@ -257,6 +284,7 @@ fn decode_eip1559(payload: &[u8]) -> Result<DecodedTx> {
         value,
         data,
         gas_limit,
+        gas_price: max_fee,
         from,
         r,
         s,
@@ -272,7 +300,7 @@ fn recover_sender(
     s: &[u8; 32],
     y_parity: u8,
 ) -> Result<[u8; 20]> {
-    use secp256k1::{ecdsa::RecoverableSignature, ecdsa::RecoveryId, Message, Secp256k1};
+    use secp256k1::{Message, Secp256k1, ecdsa::RecoverableSignature, ecdsa::RecoveryId};
     let mut sig_bytes = [0u8; 64];
     sig_bytes[..32].copy_from_slice(r);
     sig_bytes[32..].copy_from_slice(s);
@@ -323,4 +351,68 @@ fn wrap_rlp_list(items: &[&[u8]]) -> Vec<u8> {
         out.extend_from_slice(item);
     }
     out
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The EIP-155 example transaction (chain id 1), signed with private key
+    /// 0x4646...46 — sender 0x9d8A62f656a8d1615C1294fd71e9CFb3E4855A4F.
+    const EIP155_RAW: &str = "f86c098504a817c800825208943535353535353535353535353535353535353535880de0b6b3a76400008025a028ef61340bd939bc2195fe537567866003e1a15d3c71ff63e1590620aa636276a067cbe9d8997f761aecb703304b3800ccf555c9f3dc64214b297fb1966a3b6d83";
+
+    #[test]
+    fn golden_eip155_decode_and_recover() {
+        let raw = hex::decode(EIP155_RAW).unwrap();
+        let tx = decode_and_recover(&raw).unwrap();
+        assert_eq!(tx.tx_type, 0);
+        assert_eq!(tx.chain_id, Some(1));
+        assert_eq!(tx.nonce, 9);
+        assert_eq!(tx.gas_limit, 21_000);
+        assert_eq!(tx.to, Some([0x35; 20]));
+        // gas_price = 20 gwei
+        let mut gp = [0u8; 32];
+        gp[27..].copy_from_slice(&20_000_000_000u64.to_be_bytes()[3..]);
+        assert_eq!(tx.gas_price, gp);
+        assert_eq!(
+            hex::encode(tx.from),
+            "9d8a62f656a8d1615c1294fd71e9cfb3e4855a4f"
+        );
+    }
+
+    #[test]
+    fn malformed_inputs_error_instead_of_panicking() {
+        let cases: Vec<Vec<u8>> = vec![
+            vec![],                                          // empty
+            vec![0xde, 0xad, 0xbe, 0xef], // list header claiming 30-byte payload in 4 bytes
+            vec![0xc0],                   // empty list (missing items)
+            vec![0xf8],                   // len-of-len truncated
+            vec![0xfb, 0xff, 0xff, 0xff], // huge list length, truncated
+            vec![0x02],                   // 1559 marker with no payload
+            vec![0x02, 0xde, 0xad],       // 1559 with garbage payload
+            vec![0x01, 0xc0],             // unsupported tx type (2930)
+            hex::decode(EIP155_RAW).unwrap()[..30].to_vec(), // truncated valid tx
+        ];
+        for case in cases {
+            assert!(
+                decode_and_recover(&case).is_err(),
+                "expected error for {:02x?}",
+                case
+            );
+        }
+    }
+
+    #[test]
+    fn oversized_integer_rejected() {
+        // Legacy tx shape with a 9-byte nonce — decode_u64 must reject, not wrap.
+        let mut items: Vec<Vec<u8>> = Vec::new();
+        let mut nonce = vec![0x89]; // 9-byte string
+        nonce.extend_from_slice(&[0xff; 9]);
+        items.push(nonce);
+        for _ in 0..8 {
+            items.push(vec![0x80]); // empty/zero placeholders
+        }
+        let refs: Vec<&[u8]> = items.iter().map(|v| v.as_slice()).collect();
+        let raw = wrap_rlp_list(&refs);
+        assert!(decode_and_recover(&raw).is_err());
+    }
 }

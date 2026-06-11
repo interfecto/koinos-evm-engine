@@ -4,12 +4,14 @@
 //!   - "Quantity" values (block numbers, balances, gas) → `"0x<hex>"` with no leading zeros (except `"0x0"`)
 //!   - "Data" values (addresses, hashes, bytecode, calldata) → `"0x<hex>"` with even-length, lowercase
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use serde_json::Value;
 
 /// Parse `"0x<hex>"` quantity → u64. Accepts `"0x0"`, `"0x1a"`, etc.
 pub fn parse_quantity(s: &str) -> Result<u64> {
-    let s = s.strip_prefix("0x").context("expected 0x-prefixed quantity")?;
+    let s = s
+        .strip_prefix("0x")
+        .context("expected 0x-prefixed quantity")?;
     if s.is_empty() {
         return Err(anyhow!("empty quantity"));
     }
@@ -18,7 +20,9 @@ pub fn parse_quantity(s: &str) -> Result<u64> {
 
 /// Parse `"0x<hex>"` quantity → 32-byte big-endian U256. Supports values up to 256 bits.
 pub fn parse_u256_be(s: &str) -> Result<[u8; 32]> {
-    let s = s.strip_prefix("0x").context("expected 0x-prefixed quantity")?;
+    let s = s
+        .strip_prefix("0x")
+        .context("expected 0x-prefixed quantity")?;
     if s.is_empty() {
         return Err(anyhow!("empty quantity"));
     }
@@ -72,6 +76,11 @@ pub fn quantity(n: u64) -> Value {
     Value::String(format!("0x{:x}", n))
 }
 
+/// Format u128 as `"0x<hex>"` quantity (no leading zeros, lowercase).
+pub fn quantity_u128(n: u128) -> Value {
+    Value::String(format!("0x{:x}", n))
+}
+
 /// Format u256 (32 bytes) as `"0x<hex>"` quantity. Strips leading zeros except keep "0x0".
 pub fn quantity_from_be32(bytes: &[u8; 32]) -> Value {
     let hex = hex::encode(bytes);
@@ -88,8 +97,17 @@ pub fn data(bytes: &[u8]) -> Value {
     Value::String(format!("0x{}", hex::encode(bytes)))
 }
 
+/// Is a 32-byte BE quantity >= a u128 floor? (Anything with a set bit in the top
+/// 16 bytes exceeds any u128.)
+pub fn u256_be_ge_u128(v: &[u8; 32], floor: u128) -> bool {
+    if v[..16].iter().any(|&b| b != 0) {
+        return true;
+    }
+    u128::from_be_bytes(v[16..].try_into().expect("16-byte slice")) >= floor
+}
+
 /// Extract param at index — returns helpful error.
-pub fn param<'a>(params: &'a Value, idx: usize) -> Result<&'a Value> {
+pub fn param(params: &Value, idx: usize) -> Result<&Value> {
     match params {
         Value::Array(arr) => arr
             .get(idx)
@@ -98,7 +116,7 @@ pub fn param<'a>(params: &'a Value, idx: usize) -> Result<&'a Value> {
     }
 }
 
-pub fn param_str<'a>(params: &'a Value, idx: usize) -> Result<&'a str> {
+pub fn param_str(params: &Value, idx: usize) -> Result<&str> {
     param(params, idx)?
         .as_str()
         .ok_or_else(|| anyhow!("param {} must be a string", idx))
