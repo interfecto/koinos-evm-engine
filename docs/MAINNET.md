@@ -13,9 +13,13 @@ a chain-id rebuild, an independent audit, and an economics model — in dependen
 
 ## 0. The keystone decision: what is KOIN *inside* the EVM?
 
-There is currently **nothing of value to trade**. The only engine-state ERC-20s are faucet/demo
-tokens; Koinos mainnet has no stablecoin, and no bridge from Ethereum exists. So step zero is a
-KOIN↔EVM wrapper — and two facts reshape it:
+There is currently **nothing of value to trade inside the engine**. The only engine-state ERC-20s
+are faucet/demo tokens. On the Koinos side, real assets do exist: the
+[Vortex bridge](https://medium.com/koinosnetwork/announcing-vortex-bridge-8469c37e55cb) (a
+Wormhole-style 5-of-7 guardian bridge between Ethereum and Koinos) brings bridged USDT, ETH and
+KOIN onto mainnet as Koinos tokens. But a Koinos token is invisible to the EVM layer — so step
+zero is a Koinos-token↔EVM wrapper (for KOIN itself and for any bridged asset) — and two facts
+reshape it:
 
 - **It is not a cross-chain bridge.** KOIN and the EVM live on the *same* chain, so a deposit is one
   atomic Koinos transaction: a KOIN token-transfer op to a lock contract + a cross-contract call that
@@ -28,9 +32,11 @@ KOIN↔EVM wrapper — and two facts reshape it:
   MetaMask shows a real balance, and a gas-price floor becomes a usable spam gate. **This single choice
   — native-balance vs. ERC-20-only wrapper — is the highest-leverage decision on the whole list.**
 
-Sobering footnote: post-bridge, the deepest *available* launch pair is KOIN/VHP — two mechanically
-correlated assets (VHP is minted by burning KOIN), i.e. the deepest possible pool is also the one with
-the least independent price information. Real liquidity has to come from somewhere.
+Liquidity footnote: with Vortex-bridged USDT/ETH wrappable into the EVM, real launch pairs
+(KOIN/USDT, KOIN/ETH) are possible — not just the mechanically correlated KOIN/VHP. The caveat is
+**trust stacking**: an EVM-side vUSDT position is exposed to Tether *plus* the Vortex 5-of-7
+guardian set *plus* the engine owner key (§1). Each wrapper layer must be disclosed; depth still
+depends on how much capital actually bridges over.
 
 ## 1. Keys and the rug vector — **blockers**
 
