@@ -90,6 +90,9 @@ pub fn encode_submessage_field(buf: &mut Vec<u8>, field_number: u32, submessage:
 }
 
 /// Encode a sint32 using ZigZag encoding.
+/// Not used yet — kept to round out the wire-format helper set (Koinos protos
+/// use sint32 in some messages we may need later).
+#[allow(dead_code)]
 pub fn encode_sint32(value: i32) -> u64 {
     ((value << 1) ^ (value >> 31)) as u32 as u64
 }

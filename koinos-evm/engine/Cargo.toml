@@ -13,6 +13,11 @@ evm = ["dep:revm", "dep:alloy-rlp"]
 # field. Allows any Koinos caller to impersonate any EVM address. ONLY for local devnet testing
 # before submit_raw_tx lands. Never enable in a build deployed to mainnet/testnet.
 dev_unsafe_caller = ["evm"]
+# Host-side crypto seam for unit-testing the consensus-critical tx parser on a
+# native target (keccak via tiny-keccak, secp256k1 recovery via k256) without
+# Koinos syscalls. Pulls in revm/alloy-rlp for the parser's types but does NOT
+# imply `evm` (engine entry points stay disabled). Never part of a WASM build.
+host-crypto = ["dep:revm", "dep:alloy-rlp", "dep:tiny-keccak", "dep:k256"]
 
 [dependencies]
 # EVM interpreter - optional, enabled with "evm" feature
@@ -23,6 +28,10 @@ alloy-rlp = { version = "0.3", default-features = false, optional = true }
 
 # Lightweight allocator for WASM
 dlmalloc = { version = "0.2", features = ["global"] }
+
+# Host-only crypto for `host-crypto` unit tests (never in the WASM build)
+tiny-keccak = { version = "2", features = ["keccak"], optional = true }
+k256 = { version = "0.13", default-features = false, features = ["ecdsa"], optional = true }
 
 [profile.release]
 opt-level = "z"        # Optimize for size

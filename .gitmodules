@@ -16,3 +16,6 @@
 [submodule "scripts/forge/lib/v3-periphery"]
 	path = scripts/forge/lib/v3-periphery
 	url = https://github.com/Uniswap/v3-periphery
+[submodule "scripts/forge/lib/forge-std"]
+	path = scripts/forge/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std

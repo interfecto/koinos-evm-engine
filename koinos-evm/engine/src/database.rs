@@ -3,7 +3,7 @@
 use alloc::vec::Vec;
 use core::fmt;
 
-use revm::primitives::{AccountInfo, Address, Bytecode, B256, KECCAK_EMPTY, U256};
+use revm::primitives::{AccountInfo, Address, B256, Bytecode, KECCAK_EMPTY, U256};
 use revm::{Database, DatabaseCommit};
 
 use crate::koinos::sys;
@@ -13,9 +13,13 @@ use crate::state;
 /// Error type for Koinos database operations.
 #[derive(Debug, Clone)]
 pub enum KoinosDbError {
-    /// Failed to read from state.
+    /// Failed to read from state. Never constructed today: failing read syscalls
+    /// log + return empty (treated as "not found"). Kept as error API surface.
+    #[allow(dead_code)]
     ReadError,
-    /// Failed to write to state.
+    /// Failed to write to state. Never constructed today: failing write syscalls
+    /// abort the transaction via `call_system_must`. Kept as error API surface.
+    #[allow(dead_code)]
     WriteError,
     /// Data corruption.
     InvalidData,
@@ -74,17 +78,17 @@ fn deserialize_account(data: &[u8]) -> Option<AccountInfo> {
                 }
             }
             2 => {
-                if let Some(bytes) = proto::get_bytes(&field_val) {
-                    if bytes.len() == 32 {
-                        balance = U256::from_be_slice(bytes);
-                    }
+                if let Some(bytes) = proto::get_bytes(&field_val)
+                    && bytes.len() == 32
+                {
+                    balance = U256::from_be_slice(bytes);
                 }
             }
             3 => {
-                if let Some(bytes) = proto::get_bytes(&field_val) {
-                    if bytes.len() == 32 {
-                        code_hash = B256::from_slice(bytes);
-                    }
+                if let Some(bytes) = proto::get_bytes(&field_val)
+                    && bytes.len() == 32
+                {
+                    code_hash = B256::from_slice(bytes);
                 }
             }
             _ => {}
@@ -182,14 +186,15 @@ impl DatabaseCommit for KoinosDatabase {
             sys::put_object(&accounts_space, address.as_slice(), &account_data);
 
             // Write code if it exists and is new
-            if let Some(ref code) = account.info.code {
-                if !code.is_empty() && account.info.code_hash != KECCAK_EMPTY {
-                    sys::put_object(
-                        &code_space,
-                        account.info.code_hash.as_slice(),
-                        code.original_bytes().as_ref(),
-                    );
-                }
+            if let Some(ref code) = account.info.code
+                && !code.is_empty()
+                && account.info.code_hash != KECCAK_EMPTY
+            {
+                sys::put_object(
+                    &code_space,
+                    account.info.code_hash.as_slice(),
+                    code.original_bytes().as_ref(),
+                );
             }
 
             // Write storage changes

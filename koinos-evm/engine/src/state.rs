@@ -2,8 +2,8 @@
 //!
 //! All EVM state lives within the engine contract's own zone in non-system space.
 
-use alloc::vec::Vec;
 use crate::koinos::sys;
+use alloc::vec::Vec;
 
 /// Koinos object_space descriptor.
 pub struct ObjectSpace {
@@ -15,15 +15,21 @@ pub struct ObjectSpace {
 // ── Space IDs ────────────────────────────────────────────────────────────
 
 /// EVM account data: eth_addr[20] -> {nonce, balance[32], code_hash[32]}
+#[cfg_attr(not(feature = "evm"), allow(dead_code))]
 pub const SPACE_ACCOUNTS: u32 = 0;
 
 /// EVM contract code: code_hash[32] -> raw bytecode
+#[cfg_attr(not(feature = "evm"), allow(dead_code))]
 pub const SPACE_CODE: u32 = 1;
 
 /// EVM storage: eth_addr[20] || slot[32] (52 bytes) -> value[32]
+#[cfg_attr(not(feature = "evm"), allow(dead_code))]
 pub const SPACE_STORAGE: u32 = 2;
 
 /// Engine config: "config" -> {chain_id, ticks_per_gas, owner}
+/// Not used yet — reserved for the configurable chain_id/owner phase;
+/// documents the full state layout.
+#[allow(dead_code)]
 pub const SPACE_CONFIG: u32 = 3;
 
 // SPACE_NONCES (id=4) removed: EVM nonce lives in AccountInfo (SPACE_ACCOUNTS).
@@ -56,21 +62,25 @@ pub fn engine_space(id: u32) -> ObjectSpace {
 }
 
 /// Accounts space.
+#[cfg_attr(not(feature = "evm"), allow(dead_code))]
 pub fn accounts_space() -> ObjectSpace {
     engine_space(SPACE_ACCOUNTS)
 }
 
 /// Code space.
+#[cfg_attr(not(feature = "evm"), allow(dead_code))]
 pub fn code_space() -> ObjectSpace {
     engine_space(SPACE_CODE)
 }
 
 /// Storage space.
+#[cfg_attr(not(feature = "evm"), allow(dead_code))]
 pub fn storage_space() -> ObjectSpace {
     engine_space(SPACE_STORAGE)
 }
 
-/// Config space.
+/// Config space. Not used yet — see `SPACE_CONFIG`.
+#[allow(dead_code)]
 pub fn config_space() -> ObjectSpace {
     engine_space(SPACE_CONFIG)
 }
@@ -84,6 +94,7 @@ pub fn test_space() -> ObjectSpace {
 
 /// Build a storage key from an Ethereum address and storage slot.
 /// Key format: eth_addr[20] || slot[32] = 52 bytes
+#[cfg_attr(not(feature = "evm"), allow(dead_code))]
 pub fn storage_key(address: &[u8; 20], slot: &[u8; 32]) -> [u8; 52] {
     let mut key = [0u8; 52];
     key[..20].copy_from_slice(address);

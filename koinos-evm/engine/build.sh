@@ -15,8 +15,9 @@ else
     echo "Building Phase 0 (test contract only)..."
 fi
 
-# Build
-cargo build --release $FEATURES
+# Build (--locked: the artifact is consensus-critical; dependency drift must be
+# a deliberate Cargo.lock change, never an implicit resolution at build time)
+cargo build --release --locked $FEATURES
 
 # Get the output path
 TARGET_DIR="target/wasm32v1-none/release"

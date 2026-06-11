@@ -1,0 +1,9 @@
+# Pinned toolchain for reproducible builds of the consensus-critical engine
+# artifact and deterministic CI (the repo was bitten once by an unpinned-stable
+# drift: rustc 1.96 changed wasm import linking). Bump DELIBERATELY: rebuild
+# with `./koinos-evm/engine/build.sh --evm`, re-verify the MVP-opcode gate and
+# artifact size, and re-run both crates' test suites.
+[toolchain]
+channel = "1.89.0"
+components = ["rustfmt", "clippy"]
+targets = ["wasm32v1-none"]

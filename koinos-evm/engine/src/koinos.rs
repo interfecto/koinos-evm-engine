@@ -3,7 +3,6 @@
 //! Wraps the two host imports (`invoke_thunk`, `invoke_system_call`) and provides
 //! typed wrappers for the system calls needed by the EVM engine.
 
-use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 
@@ -11,37 +10,66 @@ use crate::proto;
 use crate::state::ObjectSpace;
 
 // ── System call IDs ──────────────────────────────────────────────────────
+// Currently-unused IDs carry `allow(dead_code)`: they are kept to document the
+// Koinos syscall table. IDs only reachable from EVM code paths are dead without
+// the `evm` feature.
+#[cfg_attr(not(feature = "evm"), allow(dead_code))]
 const SC_GET_HEAD_INFO: u32 = 1;
+#[allow(dead_code)]
 const SC_GET_TRANSACTION: u32 = 102;
+#[allow(dead_code)]
 const SC_GET_BLOCK: u32 = 104;
+#[allow(dead_code)]
 const SC_GET_LAST_IRREVERSIBLE_BLOCK: u32 = 106;
+#[allow(dead_code)]
 const SC_GET_ACCOUNT_RC: u32 = 201;
 const SC_PUT_OBJECT: u32 = 301;
+#[cfg_attr(not(feature = "evm"), allow(dead_code))]
 const SC_REMOVE_OBJECT: u32 = 302;
 const SC_GET_OBJECT: u32 = 303;
+#[allow(dead_code)]
 const SC_GET_NEXT_OBJECT: u32 = 304;
 const SC_LOG: u32 = 401;
+#[cfg_attr(not(feature = "evm"), allow(dead_code))]
 const SC_EVENT: u32 = 402;
+#[cfg_attr(not(feature = "evm"), allow(dead_code))]
 const SC_HASH: u32 = 501;
+#[cfg_attr(not(feature = "evm"), allow(dead_code))]
 const SC_RECOVER_PUBLIC_KEY: u32 = 502;
+#[allow(dead_code)]
 const SC_CALL: u32 = 601;
 const SC_EXIT: u32 = 602;
 const SC_GET_ARGUMENTS: u32 = 603;
 const SC_GET_CONTRACT_ID: u32 = 604;
+#[allow(dead_code)]
 const SC_GET_CALLER: u32 = 605;
+#[allow(dead_code)]
 const SC_CHECK_AUTHORITY: u32 = 606;
 
 // ── Hash multicodec values ───────────────────────────────────────────────
+// Unused codecs kept to document the multicodec table; the used ones are only
+// reachable from EVM code paths (tx.rs / precompiles.rs).
+#[allow(dead_code)]
 pub const HASH_SHA1: u64 = 0x11;
+#[cfg_attr(not(feature = "evm"), allow(dead_code))]
 pub const HASH_SHA2_256: u64 = 0x12;
+#[allow(dead_code)]
 pub const HASH_SHA2_512: u64 = 0x13;
+#[cfg_attr(not(feature = "evm"), allow(dead_code))]
 pub const HASH_KECCAK_256: u64 = 0x1b;
+#[cfg_attr(not(feature = "evm"), allow(dead_code))]
 pub const HASH_RIPEMD_160: u64 = 0x1053;
 
 // ── DSA types ────────────────────────────────────────────────────────────
+#[cfg_attr(not(feature = "evm"), allow(dead_code))]
 pub const DSA_ECDSA_SECP256K1: u64 = 0;
 
 // ── Host imports ─────────────────────────────────────────────────────────
+// The import module is pinned to "env" (what the Koinos Fizzy host resolves and
+// what older rustc emitted implicitly). Newer rustc (≥1.9x) no longer auto-imports
+// undefined wasm symbols without this attribute and fails at link time instead.
+#[cfg(target_arch = "wasm32")]
+#[link(wasm_import_module = "env")]
 unsafe extern "C" {
     fn invoke_system_call(
         sid: u32,
@@ -51,6 +79,21 @@ unsafe extern "C" {
         arg_len: u32,
         bytes_written: *mut u32,
     ) -> i32;
+}
+
+/// Non-wasm stub so host unit tests (`--features host-crypto`) and host clippy
+/// runs can link. Koinos syscalls only exist inside the chain's WASM VM; any
+/// call from a host test is a bug, so fail loudly.
+#[cfg(not(target_arch = "wasm32"))]
+unsafe fn invoke_system_call(
+    sid: u32,
+    _ret_ptr: *mut u8,
+    _ret_len: u32,
+    _arg_ptr: *const u8,
+    _arg_len: u32,
+    _bytes_written: *mut u32,
+) -> i32 {
+    panic!("Koinos syscall {sid} invoked on a non-wasm target (no chain host available)");
 }
 
 // ── Return buffer ────────────────────────────────────────────────────────
@@ -280,6 +323,7 @@ pub mod sys {
 
     /// Emit an event. Aborts on syscall failure: events are part of the
     /// committed receipt and silently dropping them breaks indexers (eth_getLogs).
+    #[cfg_attr(not(feature = "evm"), allow(dead_code))]
     pub fn event(name: &str, data: &[u8], impacted: &[&[u8]]) {
         // event_arguments { string name = 1; bytes data = 2; repeated bytes impacted = 3; }
         let mut args = Vec::new();
@@ -331,28 +375,28 @@ pub mod sys {
         // get_object_result { database_object value = 1; }
         // database_object { bool exists = 1; bytes value = 2; bytes key = 3; }
         for (field_num, field_val) in proto::FieldIter::new(&result) {
-            if field_num == 1 {
-                if let Some(submsg) = proto::get_bytes(&field_val) {
-                    let mut exists = false;
-                    let mut value = Vec::new();
-                    for (sub_field, sub_val) in proto::FieldIter::new(submsg) {
-                        match sub_field {
-                            1 => {
-                                if let Some(v) = proto::get_varint(&sub_val) {
-                                    exists = v != 0;
-                                }
+            if field_num == 1
+                && let Some(submsg) = proto::get_bytes(&field_val)
+            {
+                let mut exists = false;
+                let mut value = Vec::new();
+                for (sub_field, sub_val) in proto::FieldIter::new(submsg) {
+                    match sub_field {
+                        1 => {
+                            if let Some(v) = proto::get_varint(&sub_val) {
+                                exists = v != 0;
                             }
-                            2 => {
-                                if let Some(v) = proto::get_bytes(&sub_val) {
-                                    value = v.to_vec();
-                                }
-                            }
-                            _ => {}
                         }
+                        2 => {
+                            if let Some(v) = proto::get_bytes(&sub_val) {
+                                value = v.to_vec();
+                            }
+                        }
+                        _ => {}
                     }
-                    if exists {
-                        return Some(value);
-                    }
+                }
+                if exists {
+                    return Some(value);
                 }
             }
         }
@@ -360,6 +404,7 @@ pub mod sys {
     }
 
     /// Remove an object from state. Aborts on syscall failure (see `put_object`).
+    #[cfg_attr(not(feature = "evm"), allow(dead_code))]
     pub fn remove_object(space: &ObjectSpace, key: &[u8]) {
         // remove_object_arguments { object_space space = 1; bytes key = 2; }
         let space_bytes = encode_object_space(space);
@@ -372,6 +417,7 @@ pub mod sys {
     // ── Cryptography ─────────────────────────────────────────────────
 
     /// Hash data using the specified algorithm. Returns the multihash result.
+    #[cfg_attr(not(feature = "evm"), allow(dead_code))]
     pub fn hash(code: u64, data: &[u8]) -> Vec<u8> {
         // hash_arguments { uint64 code = 1; bytes obj = 2; uint64 size = 3; }
         let mut args = Vec::new();
@@ -383,16 +429,17 @@ pub mod sys {
 
         // hash_result { bytes value = 1; }
         for (field_num, field_val) in proto::FieldIter::new(&result) {
-            if field_num == 1 {
-                if let Some(v) = proto::get_bytes(&field_val) {
-                    return v.to_vec();
-                }
+            if field_num == 1
+                && let Some(v) = proto::get_bytes(&field_val)
+            {
+                return v.to_vec();
             }
         }
         Vec::new()
     }
 
     /// Recover a public key from a signature and digest.
+    #[cfg_attr(not(feature = "evm"), allow(dead_code))]
     pub fn recover_public_key(
         dsa_type: u64,
         signature: &[u8],
@@ -410,10 +457,10 @@ pub mod sys {
 
         // recover_public_key_result { bytes value = 1; }
         for (field_num, field_val) in proto::FieldIter::new(&result) {
-            if field_num == 1 {
-                if let Some(v) = proto::get_bytes(&field_val) {
-                    return v.to_vec();
-                }
+            if field_num == 1
+                && let Some(v) = proto::get_bytes(&field_val)
+            {
+                return v.to_vec();
             }
         }
         Vec::new()
@@ -422,6 +469,8 @@ pub mod sys {
     // ── Contract management ──────────────────────────────────────────
 
     /// Call another contract.
+    /// Not used yet — kept as API surface for future Koinos↔EVM contract bridging.
+    #[allow(dead_code)]
     pub fn call_contract(contract_id: &[u8], entry_point: u32, args_data: &[u8]) -> Vec<u8> {
         // call_arguments { bytes contract_id = 1; uint32 entry_point = 2; bytes args = 3; }
         let mut args = Vec::new();
@@ -433,10 +482,10 @@ pub mod sys {
 
         // call_result { bytes value = 1; }
         for (field_num, field_val) in proto::FieldIter::new(&result) {
-            if field_num == 1 {
-                if let Some(v) = proto::get_bytes(&field_val) {
-                    return v.to_vec();
-                }
+            if field_num == 1
+                && let Some(v) = proto::get_bytes(&field_val)
+            {
+                return v.to_vec();
             }
         }
         Vec::new()
@@ -448,16 +497,18 @@ pub mod sys {
 
         // get_contract_id_result { bytes value = 1; }
         for (field_num, field_val) in proto::FieldIter::new(&result) {
-            if field_num == 1 {
-                if let Some(v) = proto::get_bytes(&field_val) {
-                    return v.to_vec();
-                }
+            if field_num == 1
+                && let Some(v) = proto::get_bytes(&field_val)
+            {
+                return v.to_vec();
             }
         }
         Vec::new()
     }
 
     /// Get the caller's address.
+    /// Not used yet — kept as API surface for future caller-authentication work.
+    #[allow(dead_code)]
     pub fn get_caller() -> (Vec<u8>, u32) {
         let result = call_system_small(SC_GET_CALLER, &[]);
 
@@ -467,22 +518,22 @@ pub mod sys {
         let mut privilege: u32 = 1; // default: user_mode
 
         for (field_num, field_val) in proto::FieldIter::new(&result) {
-            if field_num == 1 {
-                if let Some(submsg) = proto::get_bytes(&field_val) {
-                    for (sub_field, sub_val) in proto::FieldIter::new(submsg) {
-                        match sub_field {
-                            1 => {
-                                if let Some(v) = proto::get_bytes(&sub_val) {
-                                    caller = v.to_vec();
-                                }
+            if field_num == 1
+                && let Some(submsg) = proto::get_bytes(&field_val)
+            {
+                for (sub_field, sub_val) in proto::FieldIter::new(submsg) {
+                    match sub_field {
+                        1 => {
+                            if let Some(v) = proto::get_bytes(&sub_val) {
+                                caller = v.to_vec();
                             }
-                            2 => {
-                                if let Some(v) = proto::get_varint(&sub_val) {
-                                    privilege = v as u32;
-                                }
-                            }
-                            _ => {}
                         }
+                        2 => {
+                            if let Some(v) = proto::get_varint(&sub_val) {
+                                privilege = v as u32;
+                            }
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -493,12 +544,14 @@ pub mod sys {
     // ── Block/transaction info ───────────────────────────────────────
 
     /// Head info from the chain.
+    #[cfg_attr(not(feature = "evm"), allow(dead_code))]
     pub struct HeadInfo {
         pub height: u64,
         pub head_block_time: u64,
     }
 
     /// Get current head block info.
+    #[cfg_attr(not(feature = "evm"), allow(dead_code))]
     pub fn get_head_info() -> HeadInfo {
         let result = call_system_small(SC_GET_HEAD_INFO, &[]);
 
@@ -518,10 +571,10 @@ pub mod sys {
                                 // head_topology submessage
                                 if let Some(topo) = proto::get_bytes(&hi_val) {
                                     for (t_field, t_val) in proto::FieldIter::new(topo) {
-                                        if t_field == 2 {
-                                            if let Some(v) = proto::get_varint(&t_val) {
-                                                height = v;
-                                            }
+                                        if t_field == 2
+                                            && let Some(v) = proto::get_varint(&t_val)
+                                        {
+                                            height = v;
                                         }
                                     }
                                 }

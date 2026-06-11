@@ -3,12 +3,13 @@
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
+use revm::EvmBuilder;
+use revm::handler::register::EvmHandler;
 use revm::precompile::{Precompile, PrecompileWithAddress};
 use revm::primitives::{
-    specification::SpecId, Address, BlockEnv, Bytes, CfgEnv, CfgEnvWithHandlerCfg, EVMError,
-    ExecutionResult, Log, Output, ResultAndState, TxEnv, TxKind, U256,
+    Address, BlockEnv, Bytes, CfgEnv, CfgEnvWithHandlerCfg, EVMError, ExecutionResult, Log, Output,
+    ResultAndState, TxEnv, TxKind, U256, specification::SpecId,
 };
-use revm::EvmBuilder;
 
 use crate::database::{KoinosDatabase, KoinosDbError};
 use crate::koinos::sys;
@@ -50,26 +51,26 @@ fn parse_call_args(args: &[u8]) -> EvmCallArgs {
     for (field_num, field_val) in proto::FieldIter::new(args) {
         match field_num {
             1 => {
-                if let Some(bytes) = proto::get_bytes(&field_val) {
-                    if bytes.len() >= 20 {
-                        caller.copy_from_slice(&bytes[..20]);
-                    }
+                if let Some(bytes) = proto::get_bytes(&field_val)
+                    && bytes.len() >= 20
+                {
+                    caller.copy_from_slice(&bytes[..20]);
                 }
             }
             2 => {
-                if let Some(bytes) = proto::get_bytes(&field_val) {
-                    if bytes.len() >= 20 {
-                        let mut addr = [0u8; 20];
-                        addr.copy_from_slice(&bytes[..20]);
-                        to = Some(addr);
-                    }
+                if let Some(bytes) = proto::get_bytes(&field_val)
+                    && bytes.len() >= 20
+                {
+                    let mut addr = [0u8; 20];
+                    addr.copy_from_slice(&bytes[..20]);
+                    to = Some(addr);
                 }
             }
             3 => {
-                if let Some(bytes) = proto::get_bytes(&field_val) {
-                    if bytes.len() == 32 {
-                        value = U256::from_be_slice(bytes);
-                    }
+                if let Some(bytes) = proto::get_bytes(&field_val)
+                    && bytes.len() == 32
+                {
+                    value = U256::from_be_slice(bytes);
                 }
             }
             4 => {
@@ -124,14 +125,15 @@ fn encode_evm_result(
 
 fn build_block_env() -> BlockEnv {
     let head = sys::get_head_info();
-    let mut env = BlockEnv::default();
-    env.number = U256::from(head.height);
-    env.timestamp = U256::from(head.head_block_time / 1000); // ms to seconds
-    env.basefee = U256::ZERO; // Koinos is feeless
-    env.gas_limit = U256::from(30_000_000u64);
-    env.coinbase = Address::ZERO;
-    env.difficulty = U256::ZERO;
-    env
+    BlockEnv {
+        number: U256::from(head.height),
+        timestamp: U256::from(head.head_block_time / 1000), // ms to seconds
+        basefee: U256::ZERO,                                // Koinos is feeless
+        gas_limit: U256::from(30_000_000u64),
+        coinbase: Address::ZERO,
+        difficulty: U256::ZERO,
+        ..Default::default()
+    }
 }
 
 fn build_cfg_env() -> CfgEnv {
@@ -141,6 +143,45 @@ fn build_cfg_env() -> CfgEnv {
 }
 
 // ── EVM execution ────────────────────────────────────────────────────────
+
+/// Handler register installing the Koinos precompile set. Shared by both EVM
+/// construction sites (`execute_evm`, `handle_submit_raw_tx`) so they can't drift.
+///
+/// Active precompiles:
+/// - 0x01-0x04 (ecRecover, SHA-256, RIPEMD-160, identity): OVERRIDDEN here to
+///   delegate to native Koinos crypto syscalls (avoids double-interpretation overhead).
+/// - 0x05-0x09 (modexp, bn254 ecAdd, ecMul, ecPairing, blake2f): intentionally
+///   INHERITED from revm's `Precompiles::cancun()` set (the engine runs
+///   `SpecId::CANCUN`); they are compiled into the WASM artifact and are NOT
+///   reimplemented here.
+/// - 0x0a (KZG point evaluation, EIP-4844): absent — revm's stub without the
+///   c-kzg backend; calling it fails. Intentional (c-kzg is C + build.rs and
+///   would break the MVP-WASM build).
+fn register_koinos_precompiles(handler: &mut EvmHandler<'_, (), KoinosDatabase>) {
+    let prev = handler.pre_execution.load_precompiles();
+    handler.pre_execution.load_precompiles = Arc::new(move || {
+        let mut p = prev.clone();
+        p.extend([
+            PrecompileWithAddress(
+                precompiles::ECRECOVER_ADDR,
+                Precompile::Standard(precompiles::ec_recover),
+            ),
+            PrecompileWithAddress(
+                precompiles::SHA256_ADDR,
+                Precompile::Standard(precompiles::sha256_run),
+            ),
+            PrecompileWithAddress(
+                precompiles::RIPEMD160_ADDR,
+                Precompile::Standard(precompiles::ripemd160_run),
+            ),
+            PrecompileWithAddress(
+                precompiles::IDENTITY_ADDR,
+                Precompile::Standard(precompiles::identity_run),
+            ),
+        ]);
+        p
+    });
+}
 
 fn execute_evm(
     args: &EvmCallArgs,
@@ -161,44 +202,16 @@ fn execute_evm(
         ..Default::default()
     };
 
-    let cfg_with_handler = CfgEnvWithHandlerCfg::new_with_spec_id(
-        build_cfg_env(),
-        SpecId::CANCUN,
-    );
+    let cfg_with_handler = CfgEnvWithHandlerCfg::new_with_spec_id(build_cfg_env(), SpecId::CANCUN);
 
     let mut evm = EvmBuilder::default()
         .with_db(db)
         .with_block_env(build_block_env())
         .with_cfg_env_with_handler_cfg(cfg_with_handler)
         .with_tx_env(tx_env)
-        // Override default precompile registry with Koinos-syscall-backed implementations
-        // for addresses 0x01-0x04 (ecRecover, SHA-256, RIPEMD-160, identity).
-        // These delegate to native chain syscalls, avoiding double-interpretation overhead.
-        .append_handler_register(|handler| {
-            let prev = handler.pre_execution.load_precompiles();
-            handler.pre_execution.load_precompiles = Arc::new(move || {
-                let mut p = prev.clone();
-                p.extend([
-                    PrecompileWithAddress(
-                        precompiles::ECRECOVER_ADDR,
-                        Precompile::Standard(precompiles::ec_recover),
-                    ),
-                    PrecompileWithAddress(
-                        precompiles::SHA256_ADDR,
-                        Precompile::Standard(precompiles::sha256_run),
-                    ),
-                    PrecompileWithAddress(
-                        precompiles::RIPEMD160_ADDR,
-                        Precompile::Standard(precompiles::ripemd160_run),
-                    ),
-                    PrecompileWithAddress(
-                        precompiles::IDENTITY_ADDR,
-                        Precompile::Standard(precompiles::identity_run),
-                    ),
-                ]);
-                p
-            });
-        })
+        // Precompile registry override — see `register_koinos_precompiles` for the
+        // full list of active/inherited/absent precompiles.
+        .append_handler_register(register_koinos_precompiles)
         .build();
 
     if commit {
@@ -342,6 +355,10 @@ fn execution_result_to_response(result: ExecutionResult, emit_logs_if_committing
 // ── Entry point handlers ─────────────────────────────────────────────────
 
 /// Execute a state-changing EVM transaction.
+///
+/// Only routed from `_start` when the `dev_unsafe_caller` feature is enabled
+/// (it trusts the protobuf `caller` field — see Cargo.toml).
+#[cfg_attr(not(feature = "dev_unsafe_caller"), allow(dead_code))]
 pub fn handle_execute(args: &[u8]) -> Vec<u8> {
     let call_args = parse_call_args(args);
 
@@ -372,6 +389,10 @@ pub fn handle_call_view(args: &[u8]) -> Vec<u8> {
 }
 
 /// Deploy EVM contract bytecode (CREATE).
+///
+/// Only routed from `_start` when the `dev_unsafe_caller` feature is enabled
+/// (it trusts the protobuf `caller` field — see Cargo.toml).
+#[cfg_attr(not(feature = "dev_unsafe_caller"), allow(dead_code))]
 pub fn handle_deploy_code(args: &[u8]) -> Vec<u8> {
     // Deploy is just an execute with to=None
     let mut call_args = parse_call_args(args);
@@ -464,10 +485,10 @@ pub fn handle_submit_raw_tx(args: &[u8]) -> Vec<u8> {
     // Strip protobuf wrapper
     let mut raw_tx_bytes: Vec<u8> = Vec::new();
     for (field_num, field_val) in proto::FieldIter::new(args) {
-        if field_num == 1 {
-            if let Some(b) = proto::get_bytes(&field_val) {
-                raw_tx_bytes = b.to_vec();
-            }
+        if field_num == 1
+            && let Some(b) = proto::get_bytes(&field_val)
+        {
+            raw_tx_bytes = b.to_vec();
         }
     }
     if raw_tx_bytes.is_empty() {
@@ -486,15 +507,12 @@ pub fn handle_submit_raw_tx(args: &[u8]) -> Vec<u8> {
 
     // Chain ID check: parser rejects pre-EIP-155 entirely, so parsed.chain_id is
     // always Some(_). Defensive: only enforce if Some(_) — but mismatch is fatal.
-    if let Some(cid) = parsed.chain_id {
-        if cid != ENGINE_CHAIN_ID {
-            let msg = alloc::format!(
-                "chain_id mismatch: tx={} expected={}",
-                cid, ENGINE_CHAIN_ID
-            );
-            sys::log(&msg);
-            return reject_submit(msg.as_bytes());
-        }
+    if let Some(cid) = parsed.chain_id
+        && cid != ENGINE_CHAIN_ID
+    {
+        let msg = alloc::format!("chain_id mismatch: tx={} expected={}", cid, ENGINE_CHAIN_ID);
+        sys::log(&msg);
+        return reject_submit(msg.as_bytes());
     }
 
     // Nonce check against on-chain account state
@@ -509,7 +527,8 @@ pub fn handle_submit_raw_tx(args: &[u8]) -> Vec<u8> {
     if parsed.nonce != expected_nonce {
         let msg = alloc::format!(
             "nonce mismatch: tx={} expected={}",
-            parsed.nonce, expected_nonce
+            parsed.nonce,
+            expected_nonce
         );
         sys::log(&msg);
         return reject_submit(msg.as_bytes());
@@ -534,39 +553,14 @@ pub fn handle_submit_raw_tx(args: &[u8]) -> Vec<u8> {
         ..Default::default()
     };
 
-    let cfg_with_handler =
-        CfgEnvWithHandlerCfg::new_with_spec_id(build_cfg_env(), SpecId::CANCUN);
+    let cfg_with_handler = CfgEnvWithHandlerCfg::new_with_spec_id(build_cfg_env(), SpecId::CANCUN);
 
     let mut evm = EvmBuilder::default()
         .with_db(KoinosDatabase::new())
         .with_block_env(build_block_env())
         .with_cfg_env_with_handler_cfg(cfg_with_handler)
         .with_tx_env(tx_env)
-        .append_handler_register(|handler| {
-            let prev = handler.pre_execution.load_precompiles();
-            handler.pre_execution.load_precompiles = Arc::new(move || {
-                let mut p = prev.clone();
-                p.extend([
-                    PrecompileWithAddress(
-                        precompiles::ECRECOVER_ADDR,
-                        Precompile::Standard(precompiles::ec_recover),
-                    ),
-                    PrecompileWithAddress(
-                        precompiles::SHA256_ADDR,
-                        Precompile::Standard(precompiles::sha256_run),
-                    ),
-                    PrecompileWithAddress(
-                        precompiles::RIPEMD160_ADDR,
-                        Precompile::Standard(precompiles::ripemd160_run),
-                    ),
-                    PrecompileWithAddress(
-                        precompiles::IDENTITY_ADDR,
-                        Precompile::Standard(precompiles::identity_run),
-                    ),
-                ]);
-                p
-            });
-        })
+        .append_handler_register(register_koinos_precompiles)
         .build();
 
     match evm.transact_commit() {

@@ -1,9 +1,15 @@
-#![no_std]
-#![no_main]
+// no_std/no_main/dlmalloc/panic_handler are the production (wasm32) configuration;
+// on non-wasm targets (host unit tests / clippy with `host-crypto`) the crate
+// compiles against std so the libtest harness can run. All cfg conditions below
+// evaluate exactly as before on wasm32 — the WASM artifact is unchanged.
+#![cfg_attr(target_arch = "wasm32", no_std)]
+#![cfg_attr(target_arch = "wasm32", no_main)]
 
 extern crate alloc;
+#[cfg(target_arch = "wasm32")]
 extern crate dlmalloc;
 
+#[cfg(target_arch = "wasm32")]
 #[global_allocator]
 static ALLOC: dlmalloc::GlobalDlmalloc = dlmalloc::GlobalDlmalloc;
 
@@ -17,19 +23,31 @@ mod database;
 mod engine;
 #[cfg(feature = "evm")]
 mod precompiles;
-#[cfg(feature = "evm")]
+// The tx parser also compiles under `host-crypto` (without `evm`) so its
+// consensus-critical decode/recover logic is host-testable. Without `evm`
+// nothing in the engine references it, hence the dead_code allowance.
+#[cfg(any(feature = "evm", feature = "host-crypto"))]
+#[cfg_attr(not(feature = "evm"), allow(dead_code))]
 mod tx;
 
 use alloc::vec::Vec;
 use koinos::sys;
 
-// Entry point IDs
+// Entry point IDs. Only referenced from `cfg(feature = "evm")` match arms in
+// `_start` (dev_unsafe_caller implies evm), hence dead in featureless builds.
+#[cfg_attr(not(feature = "evm"), allow(dead_code))]
 const EP_EXECUTE: u32 = 0x00000001;
+#[cfg_attr(not(feature = "evm"), allow(dead_code))]
 const EP_CALL_VIEW: u32 = 0x00000002;
+#[cfg_attr(not(feature = "evm"), allow(dead_code))]
 const EP_DEPLOY_CODE: u32 = 0x00000003;
+#[cfg_attr(not(feature = "evm"), allow(dead_code))]
 const EP_GET_ACCOUNT: u32 = 0x00000004;
+#[cfg_attr(not(feature = "evm"), allow(dead_code))]
 const EP_GET_STORAGE_AT: u32 = 0x00000005;
+#[cfg_attr(not(feature = "evm"), allow(dead_code))]
 const EP_GET_CODE: u32 = 0x00000006;
+#[cfg_attr(not(feature = "evm"), allow(dead_code))]
 const EP_SUBMIT_RAW_TX: u32 = 0x00000007;
 
 // Simple test entry points (Phase 0)
@@ -129,6 +147,7 @@ fn handle_echo(args: &[u8]) -> Vec<u8> {
     args.to_vec()
 }
 
+#[cfg(target_arch = "wasm32")]
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
     sys::log("PANIC");

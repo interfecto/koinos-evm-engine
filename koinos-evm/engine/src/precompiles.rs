@@ -6,7 +6,7 @@
 use alloc::vec::Vec;
 
 use revm::precompile::{
-    u64_to_address, PrecompileError, PrecompileErrors, PrecompileOutput, PrecompileResult,
+    PrecompileError, PrecompileErrors, PrecompileOutput, PrecompileResult, u64_to_address,
 };
 use revm::primitives::{Address, Bytes};
 
@@ -105,7 +105,7 @@ pub fn ec_recover(input: &Bytes, gas_limit: u64) -> PrecompileResult {
 
 /// Run the SHA-256 precompile (address 0x02).
 pub fn sha256_run(input: &Bytes, gas_limit: u64) -> PrecompileResult {
-    let gas = 60 + 12 * ((input.len() as u64 + 31) / 32);
+    let gas = 60 + 12 * (input.len() as u64).div_ceil(32);
     if gas_limit < gas {
         return Err(PrecompileErrors::Error(PrecompileError::OutOfGas));
     }
@@ -126,7 +126,7 @@ pub fn sha256_run(input: &Bytes, gas_limit: u64) -> PrecompileResult {
 
 /// Run the RIPEMD-160 precompile (address 0x03).
 pub fn ripemd160_run(input: &Bytes, gas_limit: u64) -> PrecompileResult {
-    let gas = 600 + 120 * ((input.len() as u64 + 31) / 32);
+    let gas = 600 + 120 * (input.len() as u64).div_ceil(32);
     if gas_limit < gas {
         return Err(PrecompileErrors::Error(PrecompileError::OutOfGas));
     }
@@ -143,10 +143,7 @@ pub fn ripemd160_run(input: &Bytes, gas_limit: u64) -> PrecompileResult {
         let hash_start = result.len() - 20;
         let mut output = [0u8; 32];
         output[12..32].copy_from_slice(&result[hash_start..]);
-        Ok(PrecompileOutput::new(
-            gas,
-            Bytes::copy_from_slice(&output),
-        ))
+        Ok(PrecompileOutput::new(gas, Bytes::copy_from_slice(&output)))
     } else {
         Err(PrecompileErrors::Error(PrecompileError::Other(
             "ripemd160 system call failed".into(),
@@ -156,7 +153,7 @@ pub fn ripemd160_run(input: &Bytes, gas_limit: u64) -> PrecompileResult {
 
 /// Run the identity precompile (address 0x04).
 pub fn identity_run(input: &Bytes, gas_limit: u64) -> PrecompileResult {
-    let gas = 15 + 3 * ((input.len() as u64 + 31) / 32);
+    let gas = 15 + 3 * (input.len() as u64).div_ceil(32);
     if gas_limit < gas {
         return Err(PrecompileErrors::Error(PrecompileError::OutOfGas));
     }
