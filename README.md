@@ -77,9 +77,8 @@ scripts/
                   V2/V3 build profiles (submodules), forge tests
   shell/          deploy_uniswap_v3.sh, deploy_v3_periphery.sh, deploy_faucet_tokens.sh,
                   deploy_v3_faucet_pool.sh, verify_precompiles.sh
-docs/             ARCHITECTURE, DEPLOYMENT, TESTING, STATUS, screenshots
+docs/             ARCHITECTURE, DEPLOYMENT, TESTING, STATUS, MAINNET, screenshots
 audit/            AUDIT.md (in-repo adversarial self-audit) + ROADMAP.md
-.github/          CI: engine MVP-WASM gates (opcode denylist + size) + proxy build/test
 ```
 
 ---
