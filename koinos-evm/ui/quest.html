@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Koinos EVM — Quest</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="quest.css" />
+</head>
+<body>
+  <main class="app quest-app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo">🗺️</span>
+        <div>
+          <h1>Koinos EVM Quest</h1>
+          <p class="sub">connect · faucet · swap · leave your pixel — all zero-gas</p>
+        </div>
+      </div>
+      <button id="connectBtn" class="btn btn-primary">Connect MetaMask</button>
+    </header>
+
+    <div class="testnet-banner">
+      <b>⚠️ Koinos Foundation testnet.</b> Chain 42069 is an experimental EVM — a real
+      <code>revm</code> engine compiled to WASM, running <i>inside a Koinos smart contract</i>.
+      Tokens here are worthless and state may reset. Gas price is 0 because every transaction
+      you send is wrapped in a Koinos transaction paid by the relay operator's
+      <a href="https://docs.koinos.io/overview/mana/" target="_blank" rel="noopener noreferrer">mana</a>,
+      which regenerates over time — nobody buys gas.
+    </div>
+
+    <section id="progressCard" class="card">
+      <ol class="quest-steps">
+        <li id="step1" class="quest-step">
+          <span class="step-badge">1</span>
+          <div class="step-body">
+            <div class="step-title">Connect MetaMask</div>
+            <div class="step-sub">Adds the Koinos EVM testnet (chain 42069) to your wallet. No gas token needed — ever.</div>
+            <details class="step-how">
+              <summary>How it works</summary>
+              <p>The "RPC URL" MetaMask talks to is not a normal Ethereum node — it's a thin Rust
+              proxy that translates Ethereum JSON-RPC into Koinos calls. The EVM itself is
+              <a href="https://github.com/bluealloy/revm" target="_blank" rel="noopener noreferrer"><code>revm</code></a>
+              (the same engine Foundry uses) compiled to WASM and deployed <i>as a smart contract</i>
+              on the Koinos testnet (<code>1E8igxy…caAoE</code>). On Ethereum, changing the VM is a
+              hard fork; here the whole EVM can be upgraded in place with one contract upload —
+              with all state preserved.</p>
+            </details>
+          </div>
+          <span class="step-state">○</span>
+        </li>
+        <li id="step2" class="quest-step locked">
+          <span class="step-badge">2</span>
+          <div class="step-body">
+            <div class="step-title">Mint faucet tokens</div>
+            <div class="step-sub">Self-serve 1,000 TFA straight from the token contract. Balance: <span id="tfaBal">—</span> TFA · <span id="tfbBal">—</span> TFB</div>
+            <details class="step-how">
+              <summary>How it works</summary>
+              <p>TFA is a standard OpenZeppelin ERC-20 with an intentionally open
+              <code>mint(address,uint256)</code> (testnet only!). Your wallet signs a normal
+              secp256k1 Ethereum transaction — same bytes as on mainnet. Notice your account has
+              <b>zero balance of anything</b> and it still works: the relay wraps your raw signed tx
+              into a Koinos transaction and pays the mana itself. After it confirms, check the
+              <b>Under the hood</b> panel below to see both halves of that trick.</p>
+            </details>
+            <button id="mintBtn" class="btn btn-primary step-btn" disabled>Mint 1,000 TFA</button>
+          </div>
+          <span class="step-state">○</span>
+        </li>
+        <li id="step3" class="quest-step locked">
+          <span class="step-badge">3</span>
+          <div class="step-body">
+            <div class="step-title">Swap on real Uniswap V3</div>
+            <div class="step-sub">Swap 10 TFA → TFB through the genuine V3 SwapRouter + 0.3% pool. <span id="swapInfo"></span></div>
+            <details class="step-how">
+              <summary>How it works</summary>
+              <p>This is not a clone: it's the real
+              <code>@uniswap/v3-periphery</code> v1.3.0 <code>SwapRouter</code> and a real
+              concentrated-liquidity pool (0.30% fee tier), deployed byte-identical from the
+              official artifacts and verified to the wei against a reference EVM. Two txs happen:
+              an ERC-20 <code>approve</code> granting the router an allowance, then
+              <code>exactInputSingle</code>. You'll receive slightly less than 10 TFB —
+              that's the 0.3% LP fee plus real price impact on the pool's liquidity curve.</p>
+            </details>
+            <button id="swapBtn" class="btn btn-primary step-btn" disabled>Swap 10 TFA → TFB</button>
+          </div>
+          <span class="step-state">○</span>
+        </li>
+        <li id="step4" class="quest-step locked">
+          <span class="step-badge">4</span>
+          <div class="step-body">
+            <div class="step-title">Leave your pixel</div>
+            <div class="step-sub">Draw on the shared 64×64 canvas below — every batch is one on-chain tx.</div>
+            <details class="step-how">
+              <summary>How it works</summary>
+              <p>The canvas is a contract storing 4,096 pixels packed 32-per-256-bit-word
+              (8 bits each, 16-color palette). <code>setPixels()</code> paints up to 128 per tx.
+              Cost is dominated by how many storage <i>words</i> you touch (~22k gas per cold
+              word), so the page estimates gas word-aware and splits scattered drawings into
+              several txs — clustered pixels are cheapest. Everyone's strokes arrive live via
+              <code>eth_subscribe("logs")</code> over a WebSocket on the same RPC port, decoded
+              from <code>PixelsSet</code> events.</p>
+            </details>
+          </div>
+          <span class="step-state">○</span>
+        </li>
+      </ol>
+      <div id="questDone" class="quest-done hidden">🎉 Quest complete — you used zero-gas Uniswap on Koinos and left your mark on-chain.</div>
+    </section>
+
+    <section id="inspectorCard" class="card hidden">
+      <div class="card-head">
+        <h2>🔬 Under the hood</h2>
+        <span class="hint">one action = two transactions, on two layers</span>
+      </div>
+      <div id="inspChips" class="insp-chips"></div>
+      <div class="insp-grid">
+        <div class="insp-col">
+          <h3 class="insp-h evm">⟠ EVM layer — what you signed</h3>
+          <div id="inspEvm" class="insp-body"></div>
+        </div>
+        <div class="insp-col">
+          <h3 class="insp-h koinos">⛓ Koinos layer — what the chain recorded</h3>
+          <div id="inspKoinos" class="insp-body"></div>
+        </div>
+      </div>
+      <p class="insp-note">Your wallet signed a plain Ethereum transaction (left). The proxy wrapped
+      those exact RLP bytes into a Koinos <code>call_contract</code> operation —
+      <code>entry_point 7 = submit_raw_tx</code> on the engine contract — signed it as the relay
+      operator, and paid the mana (right). The EVM receipt is decoded from the engine's
+      <code>evm.result</code> event in the Koinos receipt. Same action, two ledgers' views.
+      Browse the whole chain's activity in the <a href="explorer.html">EVM explorer →</a></p>
+    </section>
+
+    <section class="card canvas-card">
+      <div class="card-head">
+        <h2>The Canvas</h2>
+        <span class="hint"><span id="liveDot" class="live-dot off"></span><span id="liveLabel">connecting…</span></span>
+      </div>
+      <div class="canvas-wrap">
+        <canvas id="pixels" width="512" height="512"></canvas>
+      </div>
+      <div class="palette" id="palette"></div>
+      <div class="paint-row">
+        <span class="hint" id="pendingInfo">Pick a color, then click or drag on the canvas</span>
+        <div class="paint-btns">
+          <button id="clearBtn" class="btn btn-ghost" disabled>Clear</button>
+          <button id="paintBtn" class="btn btn-primary" disabled>Paint</button>
+        </div>
+      </div>
+      <div class="canvas-stats">
+        <span><b id="statTotal">—</b> pixels painted on-chain</span>
+        <span>yours: <b id="statMine">—</b></span>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>Live activity</h2>
+        <span class="hint">PixelsSet events · WebSocket push</span>
+      </div>
+      <ul id="activity" class="activity"><li class="hint">No paint events yet this session.</li></ul>
+    </section>
+
+    <div id="toast" class="toast hidden"></div>
+    <footer class="foot">RPC <code id="rpcUrlFoot">…</code> · chainId 42069 · <a href="index.html" style="color:var(--accent)">← Swap</a> · <a href="pool.html" style="color:var(--accent)">V3 Pools</a> · <a href="explorer.html" style="color:var(--accent)">Explorer →</a></footer>
+  </main>
+  <script src="vendor/ethers.umd.min.js"></script>
+  <script type="module" src="quest.js"></script>
+</body>
+</html>

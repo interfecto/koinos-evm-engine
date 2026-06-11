@@ -1,11 +1,19 @@
 // Shared config for the Koinos EVM swap demo UI.
 // Addresses are from scripts/shell/deploy_faucet_tokens.sh (foundation testnet).
 
+// Local dev serves the proxy directly on :8545; any other host (the public
+// deployment) reaches it same-origin under /evm-rpc behind nginx — which also
+// gives MetaMask the https URL it requires for non-localhost networks, and
+// makes the WebSocket derive to wss:// automatically.
+const IS_LOCAL_HOST =
+  typeof location !== 'undefined' &&
+  (location.hostname === 'localhost' || location.hostname === '127.0.0.1');
+
 export const CHAIN = {
   chainIdHex: '0xa455', // 42069
   chainIdNum: 42069,
   chainName: 'Koinos EVM Testnet',
-  rpcUrl: 'http://localhost:8545',
+  rpcUrl: IS_LOCAL_HOST ? 'http://localhost:8545' : `${location.origin}/evm-rpc`,
   nativeCurrency: { name: 'Test KOIN', symbol: 'tKOIN', decimals: 18 },
 };
 
@@ -71,16 +79,41 @@ export const EXPLORER_BLOCK_URL = 'https://www.koinscan.io/blocks/';
 // ─────────────────────────────────────────────────────────────────────────
 // EVM ACTIVITY EXPLORER (explorer.html / explorer.js)
 //
-// The explorer reads the Koinos foundation testnet DIRECTLY from the browser
-// (CORS is open: access-control-allow-origin: *). Every EVM tx is relayed as a
-// Koinos call_contract op to the ENGINE contract, entry_point 7 (submit_raw_tx),
-// with args = protobuf { bytes raw_tx = 1 }. So the engine contract's
-// account_history IS the EVM tx feed — one call returns each tx + its inline
-// receipt (evm.log + evm.result events). We decode the raw_tx with ethers and
-// ABI-decode calldata + logs against the registry below. No proxy needed.
+// Two feed sources, same client-side rich decoding either way:
+//
+//  'eth' (default) — the proxy's standard Ethereum JSON-RPC index
+//    (eth_blockNumber / eth_getBlockByNumber / eth_getBlockReceipts /
+//    eth_getLogs). The proxy keeps a durable index of all engine history, so
+//    this is one normal HTTP endpoint with normal eth shapes.
+//
+//  'account_history' — reads the Koinos foundation testnet DIRECTLY from the
+//    browser (CORS is open). Every EVM tx is relayed as a Koinos call_contract
+//    op to the ENGINE contract, entry_point 7 (submit_raw_tx), with args =
+//    protobuf { bytes raw_tx = 1 }, so the engine contract's account_history
+//    IS the EVM tx feed — one call returns each tx + its inline receipt
+//    (evm.log + evm.result events). We decode the raw_tx with ethers.
+//
+// The explorer falls back from 'eth' to 'account_history' at runtime if the
+// proxy errors (e.g. an older proxy without the index). Calldata + logs are
+// ABI-decoded against the registry below in BOTH modes.
 // ─────────────────────────────────────────────────────────────────────────
 
 export const EXPLORER = {
+  // Feed source: 'eth' (proxy JSON-RPC index, preferred) or 'account_history'
+  // (decode Koinos account_history client-side). Runtime falls back to
+  // 'account_history' automatically when the eth path errors.
+  dataSource: 'eth',
+  // The EVM JSON-RPC proxy (same endpoint the wallet uses).
+  ethRpcUrl: CHAIN.rpcUrl,
+  // eth-feed tuning. Blocks are ~3s and almost all EMPTY, so the feed never
+  // walks the chain block-by-block: the newest `ethTailBlocks` are fetched
+  // directly (catches txs that emit no logs, e.g. plain transfers / reverts),
+  // and older activity is located via chunked eth_getLogs windows of
+  // `ethLogWindow` blocks (the proxy caps ranges at 10 000), going at most
+  // `ethMaxLogWindows` deep or until the feed is full.
+  ethTailBlocks: 30,
+  ethLogWindow: 9900,
+  ethMaxLogWindows: 12,
   // Foundation testnet endpoints (override via window.__KOINOS_RPC__ etc. if needed).
   koinosRpcUrl: 'https://testnet.koinosfoundation.org/jsonrpc',
   koinosRestUrl: 'https://testnet.koinosfoundation.org/v1',
@@ -95,7 +128,59 @@ export const EXPLORER = {
   // id is encoded defensively even though tx ids are hash-shaped (0x1220 + hex).
   koinosTxJsonUrl: (id) =>
     `https://testnet.koinosfoundation.org/v1/transaction/${encodeURIComponent(id)}?return_receipt=true`,
-  koinosBlocksTxUrl: (id) => `https://koinosblocks.com/tx/${encodeURIComponent(id)}`,
+  // Our own Koinos-layer testnet tx viewer (ktx.html, same dir). koinosblocks.com
+  // is mainnet-only, so external links there dead-end for this chain.
+  koinosTxViewUrl: (id) => `ktx.html?tx=${encodeURIComponent(id)}`,
+};
+
+// ─────────────────────────────────────────────────────────────────────────
+// PIXEL CANVAS QUEST (quest.html / quest.js)
+//
+// 64x64 shared canvas, 16-color palette, batched setPixels (max 128/call,
+// 1024/block). Deployed 2026-06-11 from scripts/forge/src/PixelCanvas.sol.
+// The palette lives client-side: PALETTE[i] renders color index i; index 0
+// (storage default) is white. Live updates stream over the proxy's WebSocket
+// (same port as HTTP — GET upgrades) via eth_subscribe("logs").
+// ─────────────────────────────────────────────────────────────────────────
+export const PIXEL = {
+  address: '0x4157cCC46B6B328A1732527ceF7E52E9B7F261e0',
+  deployBlock: 5714545, // first possible PixelsSet log — log-replay starts here
+  width: 64,
+  maxBatch: 128,
+  // r/place 2017 palette; index 0 = white = untouched storage.
+  palette: [
+    '#FFFFFF', '#E4E4E4', '#888888', '#222222',
+    '#FFA7D1', '#E50000', '#E59500', '#A06A42',
+    '#E5D900', '#94E044', '#02BE01', '#00D3DD',
+    '#0083C7', '#0000EA', '#CF6EE4', '#820080',
+  ],
+};
+
+export const PIXEL_ABI = [
+  'function setPixels(uint16[] positions, uint8[] colors)',
+  'function getCanvas() view returns (bytes)',
+  'function pixel(uint16 pos) view returns (uint8)',
+  'function totalPixels() view returns (uint256)',
+  'function pixelsBy(address artist) view returns (uint256)',
+  'function paused() view returns (bool)',
+  'event PixelsSet(address indexed artist, uint16[] positions, uint8[] colors)',
+];
+
+// setPixels cost is dominated by how many DISTINCT 32-pixel storage words a
+// batch touches (~22k gas per fresh word: cold SLOAD + SSTORE), not by pixel
+// count: 128 CONSECUTIVE pixels = 4 words ≈ 371k gas (measured on-chain), but
+// 128 SCATTERED pixels can hit 128 words ≈ ~3M gas — which exceeds both a flat
+// UI gas limit and the relay's per-tx Koinos RC budget ("insufficient rc").
+// The quest page therefore estimates per-batch gas word-aware and AUTO-CHUNKS
+// a drawing into multiple txs so each stays within `budget` EVM gas (~2.7e8 rc,
+// V3-swap-sized — proven to fit blocks). margin covers estimator error.
+export const PIXEL_GAS = {
+  base: 100000n,     // tx base + counters (totalPixels/pixelsBy/paintedInBlock) + log bases
+  perPixel: 1200n,   // calldata + loop + event data, per pixel
+  perWord: 23000n,   // cold SLOAD + SSTORE per distinct storage word
+  budget: 800000n,   // max ESTIMATED gas per chunk (before margin)
+  marginNum: 13n,    // gasLimit = estimate * 13/10
+  marginDen: 10n,
 };
 
 // Per-address ABI-family hints. When a tx's `to` is a known contract, the decoder
@@ -104,6 +189,7 @@ export const EXPLORER = {
 // and speeds up decoding. Keys lowercase. Falls back to the global order otherwise.
 export const ADDRESS_FAMILIES = {
   '0xd6e62f045a84a77bd9a6176a0f61aa515c131c75': ['nfpm', 'erc721'], // NFPM is an ERC-721
+  '0x4157ccc46b6b328a1732527cef7e52e9b7f261e0': ['pixel'],
   '0x16ae0402bbd80d251514095c4c0f27c1cd769c70': ['v3router'],
   '0x6cd554d8c841cd2a0cf297eb49118c68d6daf88a': ['quoter'],
   '0x884df96ebbb3ab489834e869b533ff049e59e65a': ['v2router'],
@@ -160,6 +246,8 @@ export const ADDRESS_LABELS = {
   // CREATE2 test contracts
   '0x03bf6b4b070217e47635cee7e412327bcd57980e': 'Test CREATE2 Factory',
   '0x2caef6a2783db0b7b87d854649ede7fd65790939': 'Test Child',
+  // Quest
+  '0x4157ccc46b6b328a1732527cef7e52e9b7f261e0': 'PixelCanvas · Quest',
 };
 
 // ABI fragments grouped by protocol family. The explorer builds one ethers
@@ -243,6 +331,11 @@ export const ABI_FAMILIES = {
     'function createPool(address tokenA, address tokenB, uint24 fee) returns (address pool)',
     'event PairCreated(address indexed token0, address indexed token1, address pair, uint256)',
     'event PoolCreated(address indexed token0, address indexed token1, uint24 indexed fee, int24 tickSpacing, address pool)',
+  ],
+  pixel: [
+    'function setPixels(uint16[] positions, uint8[] colors)',
+    'function setPaused(bool p)',
+    'event PixelsSet(address indexed artist, uint16[] positions, uint8[] colors)',
   ],
   // Our owner-guarded V3 test helpers (V3Minter / V3Swapper / V3Flash).
   helpers: [

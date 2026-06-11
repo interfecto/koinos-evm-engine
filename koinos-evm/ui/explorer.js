@@ -1,17 +1,30 @@
 // Koinos EVM Explorer — pure client-side.
 //
-// Every EVM tx on this chain is relayed as a Koinos `call_contract` op to the
-// engine contract (entry_point 7 = submit_raw_tx) whose args carry the signed
-// Ethereum RLP tx. So the engine contract's account_history IS the EVM tx feed:
-// one RPC call returns each tx + its INLINE receipt (evm.log / evm.result events).
-// We decode the raw tx with ethers (recovering `from`), ABI-decode the calldata
-// and the logs against the registry in config.js, and render it. The foundation
-// testnet sends `access-control-allow-origin: *`, so the browser reads it directly
-// — no proxy involved.
+// FEED SOURCES (EXPLORER.dataSource in config.js):
+//
+//  'eth' (default) — the proxy's standard Ethereum JSON-RPC index. The head
+//   comes from eth_blockNumber; the newest few blocks are walked with
+//   eth_getBlockByNumber(h, true) + eth_getBlockReceipts(h) (catches txs that
+//   emit no logs), and older activity is located via chunked eth_getLogs
+//   windows — blocks are ~3s and almost all empty, so we never fetch
+//   thousands of empty blocks. Falls back at runtime to:
+//
+//  'account_history' — every EVM tx on this chain is relayed as a Koinos
+//   `call_contract` op to the engine contract (entry_point 7 = submit_raw_tx)
+//   whose args carry the signed Ethereum RLP tx. So the engine contract's
+//   account_history IS the EVM tx feed: one RPC call returns each tx + its
+//   INLINE receipt (evm.log / evm.result events). We decode the raw tx with
+//   ethers (recovering `from`) and the protobuf events by hand. The foundation
+//   testnet sends `access-control-allow-origin: *`, so the browser reads it
+//   directly — no proxy involved.
+//
+// BOTH sources produce the same normalized record and feed the same rich
+// decoding: calldata + logs are ABI-decoded against the registry in config.js.
 
 import {
   Transaction,
   Interface,
+  keccak256,
 } from 'https://esm.sh/ethers@6.13.4';
 
 import { EXPLORER, ADDRESS_LABELS, ABI_FAMILIES, ADDRESS_FAMILIES } from './config.js';
@@ -25,9 +38,9 @@ for (const [fam, frags] of Object.entries(ABI_FAMILIES)) {
   catch (e) { console.error(`bad ABI family ${fam}:`, e); }
 }
 // Calldata: specific protocols first, generic token ABIs last.
-const CALL_ORDER = ['v3router', 'nfpm', 'quoter', 'v2router', 'v3pool', 'v2pair', 'factory', 'helpers', 'erc20', 'erc721'];
+const CALL_ORDER = ['pixel', 'v3router', 'nfpm', 'quoter', 'v2router', 'v3pool', 'v2pair', 'factory', 'helpers', 'erc20', 'erc721'];
 // Logs: event-bearing protocols first, then generic.
-const LOG_ORDER = ['v3pool', 'v2pair', 'nfpm', 'factory', 'erc20', 'erc721'];
+const LOG_ORDER = ['pixel', 'v3pool', 'v2pair', 'nfpm', 'factory', 'erc20', 'erc721'];
 
 // ── Byte / base64 / protobuf helpers ─────────────────────────────────────────
 function b64uToBytes(s) {
@@ -120,6 +133,20 @@ async function fetchHistory(limit, seqNum) {
   const r = await koinosRpc('account_history.get_account_history', params);
   return (r && r.values) || [];
 }
+
+// ── Ethereum JSON-RPC (the proxy's durable index) ─────────────────────────────
+async function ethRpc(method, params) {
+  const res = await fetch(EXPLORER.ethRpcUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+  });
+  const j = await res.json();
+  if (j.error) throw new Error(`${method}: ${j.error.message || JSON.stringify(j.error)}`);
+  return j.result;
+}
+const hexNum = (h) => parseInt(h, 16);
+const hexTag = (n) => '0x' + n.toString(16);
 
 // ── Address labelling ───────────────────────────────────────────────────────
 function short(addr) {
@@ -278,6 +305,132 @@ function decodeReceiptEvents(events) {
   return { status, gasUsed, createdAddress, logs };
 }
 
+// ── eth data source: normalize a tx object (+ optional receipt) into the same
+//    record shape decodeEntry produces. `blockTs` is the block's unix seconds. ──
+function recFromEthTx(tx, receipt, blockTs) {
+  const blockNumber = tx.blockNumber != null ? hexNum(tx.blockNumber) : null;
+  const txIndex = tx.transactionIndex != null ? hexNum(tx.transactionIndex) : 0;
+  const out = {
+    // Sortable, stable key: block-global position (Koinos blocks hold few txs).
+    seq: blockNumber != null ? blockNumber * 10000 + txIndex : -1,
+    blockNumber,
+    txIndex,
+    blockTimestampMs: blockTs != null ? blockTs * 1000 : null,
+    // The proxy's EVM blockHash is the Koinos block id sans its 0x1220 multihash
+    // prefix — re-prefixing gives the REST-addressable Koinos block id.
+    koinosBlockId: tx.blockHash ? '0x1220' + tx.blockHash.slice(2) : null,
+    koinosTxId: null, // not carried by the eth APIs — resolved lazily on expand
+    kind: 'evm',
+    from: tx.from,
+    to: tx.to || null,        // null for contract creation
+    value: BigInt(tx.value || '0x0'),
+    nonce: hexNum(tx.nonce || '0x0'),
+    data: tx.input || '0x',
+    gasLimit: BigInt(tx.gas || '0x0'),
+    chainId: tx.chainId != null ? hexNum(tx.chainId) : null,
+    txType: tx.type != null ? hexNum(tx.type) : 0,
+    ethHash: tx.hash,
+    call: decodeCalldata(tx.to || null, tx.input || '0x'),
+  };
+  if (receipt) {
+    out.pending = false;
+    out.status = receipt.status === '0x0' ? '0x0' : '0x1';
+    out.gasUsed = BigInt(receipt.gasUsed || '0x0');
+    out.createdAddress = receipt.contractAddress || null;
+    out.logs = (receipt.logs || []).map((l) => ({
+      address: l.address,
+      topics: l.topics || [],
+      data: l.data || '0x',
+      decoded: decodeLog(l.topics || [], l.data || '0x'),
+    }));
+  } else {
+    // Mined-but-unindexed or not yet included → pending, NOT a false "success".
+    out.pending = true;
+    out.status = 'unknown';
+    out.gasUsed = null;
+    out.createdAddress = null;
+    out.logs = [];
+  }
+  return out;
+}
+
+// Fetch one block's records: full tx objects + the whole block's receipts.
+// Empty block → [] for the price of a single call (no receipts round-trip).
+async function ethBlockRecords(num) {
+  const blk = await ethRpc('eth_getBlockByNumber', [hexTag(num), true]);
+  if (!blk || !blk.transactions || !blk.transactions.length) return [];
+  const ts = blk.timestamp != null ? hexNum(blk.timestamp) : null;
+  const receipts = (await ethRpc('eth_getBlockReceipts', [hexTag(num)])) || [];
+  const byHash = new Map(receipts.map((r) => [r.transactionHash.toLowerCase(), r]));
+  return blk.transactions.map((tx) => recFromEthTx(tx, byHash.get(tx.hash.toLowerCase()) || null, ts));
+}
+
+// Fetch many block numbers in bounded-parallel chunks (local proxy, but be polite).
+async function ethBlocksRecords(nums) {
+  const out = [];
+  for (let i = 0; i < nums.length; i += 25) {
+    const part = await Promise.all(nums.slice(i, i + 25).map(ethBlockRecords));
+    for (const rs of part) out.push(...rs);
+  }
+  return out;
+}
+
+// eth feed state: records newest-first + the next unscanned height. Blocks are
+// immutable here (no reorg handling in this PoC), so scanned ranges never repeat.
+const ethFeed = { records: [], nextBlock: null, head: null };
+
+// Full scan: walk the newest `ethTailBlocks` directly (catches log-less txs near
+// the head), then chunked eth_getLogs windows below that to FIND active blocks
+// without touching the thousands of empty ones in between.
+async function ethInitialScan(head) {
+  const tailFrom = Math.max(0, head - (EXPLORER.ethTailBlocks - 1));
+  const tailNums = [];
+  for (let b = head; b >= tailFrom; b--) tailNums.push(b);
+  const records = await ethBlocksRecords(tailNums);
+
+  const activeBlocks = [];
+  const seenTx = new Set(records.map((r) => r.ethHash)); // early-stop heuristic
+  let hi = tailFrom - 1;
+  for (let w = 0; w < EXPLORER.ethMaxLogWindows && hi >= 0 && seenTx.size < EXPLORER.feedLimit; w++) {
+    const lo = Math.max(0, hi - (EXPLORER.ethLogWindow - 1));
+    const logs = await ethRpc('eth_getLogs', [{ fromBlock: hexTag(lo), toBlock: hexTag(hi) }]);
+    const blocks = new Set();
+    for (const l of logs || []) { blocks.add(hexNum(l.blockNumber)); seenTx.add(l.transactionHash); }
+    activeBlocks.push(...[...blocks].sort((a, b) => b - a)); // newest first
+    hi = lo - 1;
+  }
+  // Every active block holds ≥1 tx, so fetching `need` of them fills the feed.
+  const need = Math.max(0, EXPLORER.feedLimit - records.length);
+  records.push(...await ethBlocksRecords(activeBlocks.slice(0, need)));
+
+  records.sort((a, b) => b.seq - a.seq);
+  ethFeed.records = records.slice(0, EXPLORER.feedLimit);
+  ethFeed.nextBlock = head + 1;
+  ethFeed.head = head;
+}
+
+// Per-poll refresh: walk only the blocks minted since the last poll (~3 per 9s).
+// A large gap (tab slept / first run) triggers a full rescan instead.
+async function ethRefresh() {
+  const head = hexNum(await ethRpc('eth_blockNumber', []));
+  if (ethFeed.nextBlock == null || head - ethFeed.nextBlock > 300 || head < ethFeed.nextBlock - 1) {
+    await ethInitialScan(head);
+    return ethFeed.records;
+  }
+  if (head >= ethFeed.nextBlock) {
+    const nums = [];
+    for (let b = ethFeed.nextBlock; b <= head; b++) nums.push(b);
+    const fresh = await ethBlocksRecords(nums);
+    if (fresh.length) {
+      fresh.sort((a, b) => b.seq - a.seq);
+      ethFeed.records = [...fresh, ...ethFeed.records].slice(0, EXPLORER.feedLimit);
+    }
+    ethFeed.nextBlock = head + 1;
+  }
+  ethFeed.head = head;
+  return ethFeed.records;
+}
+
 // ── Rendering ─────────────────────────────────────────────────────────────────
 function esc(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -315,8 +468,12 @@ function rowHtml(rec) {
       ? '<span class="muted">… pending</span>'
       : '<span class="status-ok">✓</span>';
   const val = rec.value > 0n ? `<span class="val-num">${esc(fmtEth(rec.value))}</span>` : '<span class="muted">0</span>';
+  // eth source → show the (Koinos) block height; account_history → the seq num.
+  const seqCell = rec.blockNumber != null
+    ? `<td class="mono" title="tx ${rec.txIndex} in block ${rec.blockNumber}">${rec.blockNumber}</td>`
+    : `<td class="mono">${rec.seq}</td>`;
   return `<tr class="row" data-seq="${rec.seq}">`
-    + `<td class="mono">${rec.seq}</td>`
+    + seqCell
     + `<td>${addrHtml(rec.from)} <span class="arrow">→</span> ${toCell}</td>`
     + `<td>${methodPill(rec)}</td>`
     + `<td>${val}</td>`
@@ -340,14 +497,15 @@ function logHtml(log) {
   return `<div class="log-item"><div class="log-head">${head}</div>${body}</div>`;
 }
 
+function koinosLinksHtml(koinosTxId) {
+  if (!koinosTxId) return '';
+  return `<a href="${EXPLORER.koinosTxViewUrl(koinosTxId)}" target="_blank" rel="noopener">view Koinos tx ↗</a>`
+    + `<a href="${EXPLORER.koinosTxJsonUrl(koinosTxId)}" target="_blank" rel="noopener">raw JSON ↗</a>`;
+}
+
 async function detailHtml(rec) {
-  // Lazily fetch the containing block (height + timestamp) — one extra hop, only on expand.
+  // Lazily filled in by fillBlock() (and, for eth records, fillKoinosTxId()).
   let blockLine = '<span class="muted">fetching block…</span>';
-  const links = [];
-  if (rec.koinosTxId) {
-    links.push(`<a href="${EXPLORER.koinosTxJsonUrl(rec.koinosTxId)}" target="_blank" rel="noopener">Koinos tx JSON ↗</a>`);
-    links.push(`<a href="${EXPLORER.koinosBlocksTxUrl(rec.koinosTxId)}" target="_blank" rel="noopener">koinosblocks ↗ (set network: testnet)</a>`);
-  }
 
   const callBlock = (() => {
     const c = rec.call;
@@ -380,7 +538,7 @@ async function detailHtml(rec) {
       <div class="k">EVM gas used</div><div class="v val-num">${rec.gasUsed != null ? rec.gasUsed.toString() : '—'}</div>
       <div class="k">Tx type</div><div class="v">${rec.txType === 0 ? 'legacy (EIP-155)' : 'EIP-1559 (type 2)'} · chainId ${rec.chainId}</div>
       <div class="k">EVM tx hash</div><div class="v mono">${esc(rec.ethHash)}</div>
-      <div class="k">Koinos tx id</div><div class="v mono">${esc(rec.koinosTxId || '—')}</div>
+      <div class="k">Koinos tx id</div><div class="v mono" id="ktx-${rec.seq}">${esc(rec.koinosTxId || '—')}</div>
       <div class="k">Block</div><div class="v" id="blk-${rec.seq}">${blockLine}</div>
     </div>`;
 
@@ -388,14 +546,26 @@ async function detailHtml(rec) {
       ${kv}
       ${callBlock}
       ${logsBlock}
-      <div class="links-row">${links.join('')}</div>
+      <div class="links-row" id="links-${rec.seq}">${koinosLinksHtml(rec.koinosTxId)}</div>
     </div>`;
 }
 
 // Fill in the block height/time after the detail row is in the DOM.
 async function fillBlock(rec) {
   const el = document.getElementById(`blk-${rec.seq}`);
-  if (!el || !rec.koinosTxId) return;
+  if (!el) return;
+  // eth-source records carry the block inline — no extra hop. Kick off the lazy
+  // Koinos-tx-id resolution (best-effort) while we're at it.
+  if (rec.blockNumber != null) {
+    const when = rec.blockTimestampMs ? new Date(rec.blockTimestampMs).toLocaleString() : '';
+    el.innerHTML = `#${esc(rec.blockNumber)} ${when ? '· <span class="muted">' + esc(when) + '</span>' : ''}`;
+    fillKoinosTxId(rec);
+    return;
+  }
+  if (!rec.koinosTxId) {
+    el.innerHTML = `<span class="muted">${rec.pending ? 'pending / not yet in a block' : '—'}</span>`;
+    return;
+  }
   try {
     const txr = await koinosRest(`/transaction/${rec.koinosTxId}`);
     const bId = txr.containing_blocks && txr.containing_blocks[0];
@@ -409,6 +579,40 @@ async function fillBlock(rec) {
   } catch (e) {
     el.innerHTML = '<span class="muted">block lookup failed</span>';
   }
+}
+
+// The eth APIs don't carry the Koinos tx id. But the EVM blockHash IS the Koinos
+// block id (sans 0x1220), so one REST block fetch + matching keccak256(raw_tx)
+// against the eth hash recovers it — best-effort, only on expand.
+async function fillKoinosTxId(rec) {
+  if (!rec.koinosTxId && rec.koinosBlockId && rec.ethHash) {
+    try {
+      const blk = await koinosRest(`/block/${rec.koinosBlockId}`);
+      const want = rec.ethHash.toLowerCase();
+      outer:
+      for (const t of (blk.block && blk.block.transactions) || []) {
+        for (const o of t.operations || []) {
+          const c = o && o.call_contract;
+          if (!c || c.entry_point !== EXPLORER.submitRawTxEntryPoint || !c.args) continue;
+          if (c.contract_id && c.contract_id !== EXPLORER.engineAddress) continue;
+          let raw = null;
+          for (const f of protoFields(b64uToBytes(c.args))) {
+            if (f.field === 1 && f.wtype === 2) raw = f.payload;
+          }
+          // eth tx hash = keccak256 of the raw signed tx bytes (incl. type prefix).
+          if (raw && raw.length && keccak256(raw).toLowerCase() === want) {
+            rec.koinosTxId = t.id;
+            break outer;
+          }
+        }
+      }
+    } catch (_) { /* best-effort — leave '—' */ }
+  }
+  if (!rec.koinosTxId) return;
+  const ktxEl = document.getElementById(`ktx-${rec.seq}`);
+  if (ktxEl) ktxEl.textContent = rec.koinosTxId;
+  const linksEl = document.getElementById(`links-${rec.seq}`);
+  if (linksEl) linksEl.innerHTML = koinosLinksHtml(rec.koinosTxId);
 }
 
 // ── Feed state + polling ────────────────────────────────────────────────────
@@ -463,24 +667,46 @@ function setStatus(kind, text) {
   feedInfo.textContent = text;
 }
 
+// Active feed source. Starts at the configured one; a failing eth path demotes
+// to account_history for the rest of the session (e.g. an older proxy).
+let activeSource = EXPLORER.dataSource === 'account_history' ? 'account_history' : 'eth';
+let firstLoad = true;
+
+async function fetchFeedRecords() {
+  if (activeSource === 'eth') {
+    try {
+      return await ethRefresh();
+    } catch (e) {
+      console.warn('eth feed failed — falling back to account_history:', e);
+      activeSource = 'account_history';
+      ethFeed.records = []; ethFeed.nextBlock = null; ethFeed.head = null;
+    }
+  }
+  const entries = await fetchHistory(EXPLORER.feedLimit);
+  return entries.map(decodeEntry);
+}
+
 async function refreshFeed() {
   try {
-    const entries = await fetchHistory(EXPLORER.feedLimit);
-    const decoded = entries.map(decodeEntry).sort((a, b) => b.seq - a.seq);
+    const decoded = (await fetchFeedRecords()).slice().sort((a, b) => b.seq - a.seq);
     const newMaxSeq = decoded.length ? decoded[0].seq : -1;
-    const changed = newMaxSeq !== state.maxSeq;
-    // Only re-render when the feed head actually advanced — avoids a 9s flicker that
+    const changed = newMaxSeq !== state.maxSeq || decoded.length !== state.records.length;
+    // Only re-render when the feed actually changed — avoids a 9s flicker that
     // would collapse/reload an open detail row and re-hit REST for it.
-    if (changed) {
+    if (changed || firstLoad) {
       state.records = decoded;
       state.bySeq = new Map(decoded.map((r) => [r.seq, r]));
       state.maxSeq = newMaxSeq;
       // Drop the expanded row if it scrolled out of the window.
       if (state.expanded != null && !state.bySeq.has(state.expanded)) state.expanded = null;
       renderFeed();
+      firstLoad = false;
     }
     const evmCount = state.records.filter((r) => r.kind === 'evm').length;
-    setStatus('live', `live · ${evmCount} EVM txs · seq ≤ ${state.maxSeq} · refreshes every ${Math.round(EXPLORER.pollMs / 1000)}s`);
+    const headLabel = activeSource === 'eth'
+      ? `block ≤ ${ethFeed.head != null ? ethFeed.head : '?'}`
+      : `seq ≤ ${state.maxSeq}`;
+    setStatus('live', `live · ${activeSource} · ${evmCount} EVM txs · ${headLabel} · refreshes every ${Math.round(EXPLORER.pollMs / 1000)}s`);
   } catch (e) {
     setStatus('err', `error: ${e.message || e}`);
   }
@@ -508,6 +734,22 @@ async function findEntryForKoinosTxId(koinosTxId) {
   // marks it pending rather than reporting a false "success".
   const receipt = txr.receipt || (txr.receipts && txr.receipts[0]) || null;
   return decodeEntry({ seq_num: 'manual', trx: { transaction, receipt } });
+}
+
+// Direct lookup against the proxy's restart-safe index. Returns null when the
+// proxy doesn't know the hash; a pending tx (no receipt yet) renders as pending.
+async function findEntryViaEthRpc(ethHash) {
+  const tx = await ethRpc('eth_getTransactionByHash', [ethHash]);
+  if (!tx) return null;
+  const receipt = await ethRpc('eth_getTransactionReceipt', [ethHash]);
+  let ts = null;
+  if (tx.blockNumber != null) {
+    try {
+      const blk = await ethRpc('eth_getBlockByNumber', [tx.blockNumber, false]);
+      if (blk && blk.timestamp != null) ts = hexNum(blk.timestamp);
+    } catch (_) { /* timestamp is cosmetic */ }
+  }
+  return recFromEthTx(tx, receipt, ts);
 }
 
 async function findEntryForEthHash(ethHash) {
@@ -541,8 +783,13 @@ async function doDecode() {
     if (raw.startsWith('0x1220') && raw.length === 70) {
       rec = await findEntryForKoinosTxId(raw);          // 34-byte koinos multihash
     } else if (raw.length === 66) {
-      rec = await findEntryForEthHash(raw);              // 32-byte eth hash
-      if (!rec) throw new Error('not found in recent engine history — paste the Koinos tx id (0x1220…) instead');
+      // 32-byte eth hash: ask the proxy's index first (covers all history, incl.
+      // pending txs); fall back to scanning recent engine account_history.
+      try { rec = await findEntryViaEthRpc(raw); }
+      catch (e) { console.warn('eth lookup failed — scanning account_history:', e); }
+      if (!rec) rec = await findEntryForEthHash(raw);
+      if (!rec) throw new Error('not found via the proxy or in recent engine history — paste the Koinos tx id (0x1220…) instead');
+      rec.seq = 'manual'; // keep DOM ids distinct from a feed row of the same tx
     } else if (raw.startsWith('0x1220')) {
       rec = await findEntryForKoinosTxId(raw);
     } else {

@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Koinos Testnet Tx — EVM Quest</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="quest.css" />
+</head>
+<body>
+  <main class="app quest-app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo">⛓</span>
+        <div>
+          <h1>Koinos Testnet Transaction</h1>
+          <p class="sub">the wrapper view — a Koinos L1 tx carrying an EVM tx inside</p>
+        </div>
+      </div>
+    </header>
+
+    <div class="testnet-banner">
+      <b>Koinos Foundation testnet</b> · data straight from
+      <code>testnet.koinosfoundation.org</code>. Every EVM action on this chain is wrapped in a
+      Koinos <code>call_contract</code> operation on the engine contract and paid in regenerating
+      mana by the relay operator.
+    </div>
+
+    <section class="card">
+      <div class="card-head"><h2>Lookup</h2><span class="hint">Koinos tx id (0x1220…)</span></div>
+      <div class="swap-row">
+        <input id="txIn" class="amount" type="text" spellcheck="false" autocomplete="off"
+               placeholder="0x1220…" style="font-size:13px;font-family:ui-monospace,Menlo,monospace" />
+        <button id="loadBtn" class="btn btn-primary">View</button>
+      </div>
+    </section>
+
+    <div id="out"></div>
+
+    <div id="toast" class="toast hidden"></div>
+    <footer class="foot"><a href="quest.html" style="color:var(--accent)">← Quest</a> · <a href="explorer.html" style="color:var(--accent)">EVM Explorer</a> · REST <code>testnet.koinosfoundation.org/v1</code></footer>
+  </main>
+  <script src="vendor/ethers.umd.min.js"></script>
+  <script type="module" src="ktx.js"></script>
+</body>
+</html>
