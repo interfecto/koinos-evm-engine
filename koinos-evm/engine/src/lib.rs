@@ -50,11 +50,21 @@ const EP_GET_CODE: u32 = 0x00000006;
 #[cfg_attr(not(feature = "evm"), allow(dead_code))]
 const EP_SUBMIT_RAW_TX: u32 = 0x00000007;
 
-// Simple test entry points (Phase 0)
+// Simple test entry points (Phase 0). Only matched in the wasm `_start`; dead on host.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 const EP_STORE_VALUE: u32 = 0x10000001;
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 const EP_READ_VALUE: u32 = 0x10000002;
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 const EP_ECHO: u32 = 0x10000003;
 
+// The contract entry point. wasm32-only: on a host target (`host-crypto` unit
+// tests / clippy) a `#[no_mangle] _start` collides with the C runtime's own
+// `_start` (multiple-definition link error), and host builds compile against
+// std + libtest where this ABI shim is meaningless. The consensus-critical
+// logic (tx parse/recover, etc.) is host-testable directly; only this shim and
+// its Phase-0 dispatch handlers are gated off.
+#[cfg(target_arch = "wasm32")]
 #[unsafe(no_mangle)]
 pub extern "C" fn _start() {
     let args = sys::get_arguments();
@@ -101,6 +111,8 @@ pub extern "C" fn _start() {
 }
 
 /// Phase 0 test: store a value in object space
+/// Only dispatched from the wasm `_start`; dead on host builds.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 fn handle_store_value(args: &[u8]) -> Vec<u8> {
     // Args format: key_len(4 LE) + key + value
     if args.len() < 5 {
@@ -126,6 +138,7 @@ fn handle_store_value(args: &[u8]) -> Vec<u8> {
 }
 
 /// Phase 0 test: read a value from object space
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 fn handle_read_value(args: &[u8]) -> Vec<u8> {
     // Args: raw key bytes
     let space = state::test_space();
@@ -142,6 +155,7 @@ fn handle_read_value(args: &[u8]) -> Vec<u8> {
 }
 
 /// Phase 0 test: echo back the arguments
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 fn handle_echo(args: &[u8]) -> Vec<u8> {
     sys::log("echo: returning args");
     args.to_vec()

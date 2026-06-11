@@ -234,7 +234,8 @@ heavy read views (`Quoter`, `positions()`, `getAmountsOut`) hit a per-node read-
 default public node (solved by running a raised-limit node); there's no KOIN↔EVM bridge, no fee
 market, and a single operator key that also owns the upgradeable engine. These are the **system
 wrapper**, not the execution core — the core is the hard part and it's done. Full detail + roadmap in
-**[docs/STATUS.md](docs/STATUS.md)**.
+**[docs/STATUS.md](docs/STATUS.md)**; what a real-value mainnet launch would additionally require is
+assessed in **[docs/MAINNET.md](docs/MAINNET.md)**.
 
 ---
 

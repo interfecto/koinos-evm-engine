@@ -39,6 +39,7 @@ const SC_RECOVER_PUBLIC_KEY: u32 = 502;
 #[allow(dead_code)]
 const SC_CALL: u32 = 601;
 const SC_EXIT: u32 = 602;
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 const SC_GET_ARGUMENTS: u32 = 603;
 const SC_GET_CONTRACT_ID: u32 = 604;
 #[allow(dead_code)]
@@ -233,6 +234,8 @@ pub mod sys {
     use super::*;
 
     /// Parsed arguments from get_arguments syscall.
+    /// Only used by the wasm `_start` dispatcher; dead on host builds.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     pub struct Arguments {
         pub entry_point: u32,
         pub arguments: Vec<u8>,
@@ -240,6 +243,7 @@ pub mod sys {
 
     /// Get the entry point and arguments for the current call.
     /// Uses the large buffer since calldata (EVM contract init code) can exceed 4KB.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     pub fn get_arguments() -> Arguments {
         let result = call_system(SC_GET_ARGUMENTS, &[]);
 
@@ -278,6 +282,7 @@ pub mod sys {
     }
 
     /// Exit with success, returning serialized result.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     pub fn exit_success(data: &[u8]) {
         // exit_arguments { int32 code = 1; result res = 2; }
         // result { oneof { bytes object = 1; error_data error = 2; } }

@@ -31,7 +31,12 @@ pub fn effective_client_ip(peer: IpAddr, headers: &HeaderMap, trust: bool) -> Ip
     if let Some(ip) = headers
         .get("x-forwarded-for")
         .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.split(',').map(str::trim).filter(|p| !p.is_empty()).next_back())
+        .and_then(|s| {
+            s.split(',')
+                .map(str::trim)
+                .filter(|p| !p.is_empty())
+                .next_back()
+        })
         .and_then(|s| s.parse().ok())
     {
         return ip;
