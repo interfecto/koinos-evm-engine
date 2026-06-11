@@ -79,10 +79,13 @@ Addresses live in `config.js`. If the testnet resets, redeploy with
 
 ## Notes
 
-- The proxy keeps tx metadata **in memory** — restarting it mid-session breaks
-  receipt/`getTransactionByHash` lookups for prior txs. Don't restart while a tx is pending.
-- Reads use a direct provider to `:8545`; writes go through MetaMask. The proxy sends
-  permissive CORS so the browser can read directly.
+- The proxy keeps a **durable SQLite store** (`DB_PATH`, default `./koinos-evm-rpc.sqlite`) for
+  txs/receipts/logs/blocks, so `getTransactionByHash`/receipt lookups survive restarts; an indexer
+  backfills the engine's entire history on first start. Delete the DB file to reset (it rebuilds
+  from chain).
+- Reads use a direct provider to `:8545`; writes go through MetaMask. The proxy ships a CORS origin
+  allowlist (`CORS_ALLOWED_ORIGINS`, defaulting to the local dev ports; set `"*"` for fully
+  permissive dev-only CORS).
 - Localhost demo only — `mint()` is intentionally open. Never point this at a network
   where token supply has value.
 - `run.sh` **requires** `OPERATOR_PRIVKEY_HEX` — the operator wallet that pays Koinos mana

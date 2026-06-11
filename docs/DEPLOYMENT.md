@@ -12,6 +12,29 @@ How to build the engine + proxy and deploy contracts from a fresh clone. Everyth
   the testnet faucet. You also need its raw secp256k1 key as `OPERATOR_PRIVKEY_HEX`.
 - The [`koinos-cli`](https://github.com/koinos/koinos-cli) (only needed to *upload* the engine WASM).
 
+> **Just want to USE the chain (deploy Solidity, swap)?** You don't need most of this. The proxy
+> defaults `ENGINE_CONTRACT` to the engine already live on the testnet, so build only the proxy
+> (`cd koinos-evm/rpc && cargo build --release`), supply a funded operator key, and skip §1–§3
+> (submodules, engine WASM, upload) entirely. See the README "Fast path" and §5 "Deploy your own
+> contract" below.
+
+### Koinos prerequisites for Ethereum-native devs
+
+The operator key is the one Koinos-native thing you need. Steps:
+
+1. **Get the CLI.** Download a [`koinos-cli`](https://github.com/koinos/koinos-cli) release.
+2. **Create a wallet:** in the CLI, `create my.wallet` (or `open my.wallet`). It prints/stores a
+   secp256k1 keypair and an address.
+3. **Point it at the testnet** and **fund it** from the Koinos foundation testnet faucet (the foundation
+   distributes testnet KOIN; check the current Koinos docs/community for the active faucet — it has moved
+   over time). You only need a few KOIN; mana regenerates (~5 days to full).
+4. **Export the raw private key** as 32-byte hex for `OPERATOR_PRIVKEY_HEX`: in the CLI, `open` the
+   wallet then `private` prints the WIF; convert WIF → raw hex (drop the version byte + checksum, take the
+   32-byte payload). That hex string is what the proxy wants.
+
+The same key can deploy your engine (§3) if you go the full path; for the fast path it only ever pays
+mana, never owns anything.
+
 See [CONTRIBUTING.md](../CONTRIBUTING.md) for exact install commands.
 
 ## 1. Fetch submodules
@@ -100,6 +123,26 @@ DEPLOYER_PK=<deployer-key> RPC=http://localhost:8545 ./scripts/shell/deploy_v3_f
 
 After deploying, paste the printed addresses into `koinos-evm/ui/config.js` so the UIs point at your
 deployment.
+
+### Deploy your OWN contract (Foundry)
+
+Nothing special — point `forge`/`cast` at the running proxy. A brand-new key with zero balance works,
+because gas price is 0:
+
+```bash
+cast wallet new                          # throwaway EVM key; no funding needed
+forge create src/MyContract.sol:MyContract \
+  --rpc-url http://localhost:8545 \
+  --private-key <key> \
+  --gas-limit 8000000 \                  # pass an explicit limit (see gas note)
+  --legacy --broadcast
+```
+
+Gas notes: `eth_estimateGas` returns a 5M fallback on a default public node (the estimation view hits
+the read-compute limit), so set `--gas-limit` explicitly — **≥ 8M for contracts larger than ~10 KB**
+(the Factory ≈ 3M, Router02 ≈ 4.8M). `--legacy` avoids 1559 fee fields the chain reports as 0. Reads of
+heavy view functions (`QuoterV2`, `positions()`) need a raised-read-limit node — on a default node your
+tooling sees `-32005` (the Koinos node reports `-1013` internally).
 
 ## 6. Public exposure (TLS reverse proxy)
 

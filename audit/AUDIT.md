@@ -1,5 +1,12 @@
 # Koinos EVM Engine — Code Audit
 
+> **Point-in-time snapshot (commit `c901d19`, 2026-06-09).** This is an in-repo *self-audit*, not an
+> independent third-party review. Several findings have since been fixed — notably the HIGH operator-nonce
+> desync (now reconciled + submit-serialized, [STATUS.md](../docs/STATUS.md) correctness fix #3) and the
+> persistence / `eth_getLogs` exposure (durable store + indexer landed). Treat **[STATUS.md](../docs/STATUS.md)**
+> as the current state of the code; treat this file as the threat-model record. Findings are NOT re-dated as
+> they are resolved.
+
 **Date:** 2026-06-09
 **Scope:** full repo at commit `c901d19` — engine (`koinos-evm/engine`), proxy (`koinos-evm/rpc`),
 UIs (`koinos-evm/ui`), build/deploy scripts (`scripts/`), docs.

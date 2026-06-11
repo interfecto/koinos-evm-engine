@@ -7,9 +7,15 @@ JSON-RPC into Koinos calls, so MetaMask, `cast`, and Foundry drive it directly *
 (Some read-side tooling is still partial — see the honest [Status](docs/STATUS.md).)
 
 > **Headline result:** unmodified **Uniswap V2** and **Uniswap V3** (core *and* periphery) run on
-> Koinos and produce results **byte-exact vs a mainnet reference EVM** for the exercised paths —
-> concentrated liquidity, tick-crossing swaps, CREATE2, 512-bit math, NFT positions, and all.
+> Koinos and produce results **byte-exact vs a reference EVM** (an `anvil` loaded with byte-identical
+> compiled artifacts, matched to the wei) for the exercised paths — concentrated liquidity,
+> tick-crossing swaps, CREATE2, 512-bit math, NFT positions, and all.
 > Live on the Koinos foundation testnet; usable through MetaMask.
+
+> **No public endpoint — you run the relay yourself.** There is no hosted RPC URL in this repo. The
+> quickstart below builds the proxy and points MetaMask at your own `localhost:8545`. The proxy
+> defaults to the already-deployed engine + Uniswap contracts on the testnet, so you do **not** need
+> to build the WASM engine or deploy anything to start using it.
 
 > ⚠️ **Status: proof of concept / research artifact.** This is a rigorously-tested *execution core*,
 > not a production network. It is single-operator, has no bridge, no fee market, and no decentralized
@@ -60,13 +66,20 @@ koinos-evm/
     src/          lib.rs (dispatch), engine.rs, tx.rs, database.rs, precompiles.rs, koinos.rs, proto.rs, state.rs
     build.sh      cargo build + wasm-opt -Oz + MVP-opcode check
   rpc/            Rust JSON-RPC proxy (Ethereum ↔ Koinos)
-    src/          main.rs, rpc.rs (dispatch), eth_tx.rs, koinos_tx.rs, koinos.rs, engine_proto.rs, state.rs
-  ui/             Vanilla-JS dApps (ethers v6, no build): swap, V3 pool manager, EVM explorer
+    src/          main.rs, rpc.rs (dispatch), eth_tx.rs, koinos_tx.rs, koinos.rs, engine_proto.rs,
+                  eth_codec.rs, state.rs, db.rs (durable SQLite store), indexer.rs (history backfill),
+                  ws.rs (eth_subscribe), bloom.rs (logsBloom), limit.rs (per-IP rate limiting)
+  ui/             Vanilla-JS dApps (ethers v6, no build): swap, V3 pool manager, EVM explorer,
+                  guided quest, Koinos-layer tx viewer
   verify_step1.sh / verify_step2.sh   on-chain receipt-status + pending-nonce checks
 scripts/
-  forge/          Foundry project: helper contracts + Uniswap V2/V3 build profiles (submodules)
-  shell/          deploy_uniswap_v3.sh, deploy_v3_periphery.sh, deploy_faucet_tokens.sh, deploy_v3_faucet_pool.sh
+  forge/          Foundry project: helper + quest contracts (PixelCanvas, PrecompileProbe), Uniswap
+                  V2/V3 build profiles (submodules), forge tests
+  shell/          deploy_uniswap_v3.sh, deploy_v3_periphery.sh, deploy_faucet_tokens.sh,
+                  deploy_v3_faucet_pool.sh, verify_precompiles.sh
 docs/             ARCHITECTURE, DEPLOYMENT, TESTING, STATUS, screenshots
+audit/            AUDIT.md (in-repo adversarial self-audit) + ROADMAP.md
+.github/          CI: engine MVP-WASM gates (opcode denylist + size) + proxy build/test
 ```
 
 ---
@@ -78,23 +91,70 @@ docs/             ARCHITECTURE, DEPLOYMENT, TESTING, STATUS, screenshots
 [Koinos foundation testnet](https://testnet.koinosfoundation.org) operator account. See
 **[CONTRIBUTING.md](CONTRIBUTING.md)** for exact toolchain setup.
 
+### Fast path — use the live testnet engine (no WASM build, no deploy)
+
+The proxy defaults `ENGINE_CONTRACT` to the engine already on the testnet, so to *use* the chain
+(deploy your own Solidity, swap, etc.) you only build the **proxy** and supply a funded Koinos
+operator key — skip the engine toolchain (binaryen/`wasm-opt`) and submodules entirely.
+
 ```bash
-git clone --recurse-submodules <your-fork-url> koinos-evm-engine
+git clone https://github.com/interfecto/koinos-evm-engine
 cd koinos-evm-engine
 
-# 1. Build the EVM engine (WASM) and the proxy
-( cd koinos-evm/engine && ./build.sh --evm )
-( cd koinos-evm/rpc    && cargo build --release )
+# Build ONLY the proxy
+( cd koinos-evm/rpc && cargo build --release )
 
-# 2. Run the proxy + the browser dApp (you supply a funded operator key)
+# Run it (the operator key pays Koinos mana for every relayed tx — see the note below)
+OPERATOR_PRIVKEY_HEX=<funded-operator-key-hex> \
+  ./koinos-evm/rpc/target/release/koinos-evm-rpc      # JSON-RPC on 127.0.0.1:8545
+```
+
+Point any Ethereum tool at it:
+
+| Field | Value |
+|---|---|
+| RPC URL | `http://localhost:8545` |
+| Chain ID | `42069` |
+| Currency symbol | `tKOIN` |
+
+```bash
+# A brand-new key with ZERO balance can deploy immediately — gas price is 0.
+cast wallet new
+forge create src/MyContract.sol:MyContract --rpc-url http://localhost:8545 \
+  --private-key <any-key> --gas-limit 8000000 --legacy --broadcast
+```
+
+> **Getting an operator key (Koinos side):** the operator account pays mana for everyone, so it must
+> be a funded Koinos testnet account — this is the one Koinos-native step. Create a wallet with
+> `koinos-cli`, fund it from the testnet faucet, and export its raw secp256k1 private key as 32-byte
+> hex for `OPERATOR_PRIVKEY_HEX`. See **[docs/DEPLOYMENT.md → Koinos prerequisites](docs/DEPLOYMENT.md)**.
+
+### Full path — build the engine and the bundled UIs
+
+```bash
+git clone --recurse-submodules https://github.com/interfecto/koinos-evm-engine
+cd koinos-evm-engine
+( cd koinos-evm/engine && ./build.sh --evm )           # WASM engine (only needed to deploy your own)
+( cd koinos-evm/rpc    && cargo build --release )
 cd koinos-evm/ui
 OPERATOR_PRIVKEY_HEX=<your-operator-key-hex> ./run.sh   # proxy :8545 + UI :8080
 # open http://localhost:8080  → Connect MetaMask (it offers to add chain 42069)
 ```
 
-To deploy your own contracts (engine + a fresh testnet account required), see
+To deploy your **own engine** (a fresh testnet account required), see
 **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**. To reproduce the Uniswap V2/V3 byte-exact tests, see
 **[docs/TESTING.md](docs/TESTING.md)**.
+
+### What silently differs from Ethereum
+
+Read [docs/STATUS.md](docs/STATUS.md) for the full matrix, but the breaks a dapp dev hits first:
+
+| Assumption | Reality on chain 42069 |
+|---|---|
+| `msg.value` / `payable` / native transfers | **Unsupported.** No path mints native balance, so any `value > 0` tx reverts (insufficient funds) and `eth_getBalance` is always `0`. Token-only flows (ERC-20, V3 token↔token) work fully; `value == 0` calls to `payable` functions are fine. |
+| `eth_estimateGas` on writes | On a default public node the estimation view exceeds the read-compute limit; the proxy returns a 5M fallback (`ESTIMATE_GAS_FALLBACK`). Pass an explicit `--gas-limit` (≥ 8M for contracts > 10 KB). |
+| Heavy `eth_call` views (`QuoterV2`, `positions()`) | Exceed a default public node's ~10M read-compute cap → your tooling sees `-32005` (the Koinos node reports `-1013` internally). Run a raised-read-limit node, or read via events. |
+| Gas price | Always `0`. Harmless, but some tools assume nonzero. |
 
 ---
 
@@ -107,6 +167,8 @@ Three static pages (vanilla JS + ethers v6, no build step) live in `koinos-evm/u
 | `index.html` | Mint faucet tokens + Uniswap **V2 swap** | for writes |
 | `pool.html` | Uniswap **V3 pool manager** — concentrated-liquidity positions (mint/increase/decrease/collect/burn) + V3 swap | for writes |
 | `explorer.html` | **EVM explorer** — decodes every relayed tx (calldata + events) from Koinos account history | no |
+| `quest.html` | **Guided quest** — connect → mint → swap → draw on a shared on-chain pixel canvas, each step verified on-chain, with an "under the hood" panel showing each tx on both the EVM and Koinos layers | for writes |
+| `ktx.html` | **Koinos-layer tx viewer** — renders a Koinos testnet tx and decodes the EVM tx wrapped inside it (mainnet explorers can't show this chain) | no |
 
 ### Screenshots
 
@@ -162,11 +224,16 @@ accrual, a second fee tier, flash, protocol fees); V3 periphery (SwapRouter, NFT
 QuoterV2 deploy). MetaMask end-to-end. Honest receipt status and back-to-back nonces (see
 [docs/STATUS.md](docs/STATUS.md) for the two fixes).
 
+Since the initial release the relay also gained a durable SQLite store, full `eth_getLogs` (with
+blooms + block-global `logIndex`), WebSocket `eth_subscribe`, and serialized operator-nonce submits —
+all live-verified (see [docs/STATUS.md](docs/STATUS.md)).
+
 **Not yet (don't claim otherwise):** *not* production-ready, *not* decentralized, *not* economically
-safe, *not* "standard Ethereum tooling fully works." Heavy read views (`Quoter`, `positions()`,
-`getAmountsOut`) hit a per-node read-compute limit; there's no persistence/`eth_getLogs`, no
-KOIN↔EVM bridge, no fee market, and a single operator key. These are the **system wrapper**, not the
-execution core — the core is the hard part and it's done. Full detail + roadmap in
+safe, *not* "standard Ethereum tooling fully works." `msg.value`/native-value paths are unsupported;
+heavy read views (`Quoter`, `positions()`, `getAmountsOut`) hit a per-node read-compute limit on a
+default public node (solved by running a raised-limit node); there's no KOIN↔EVM bridge, no fee
+market, and a single operator key that also owns the upgradeable engine. These are the **system
+wrapper**, not the execution core — the core is the hard part and it's done. Full detail + roadmap in
 **[docs/STATUS.md](docs/STATUS.md)**.
 
 ---

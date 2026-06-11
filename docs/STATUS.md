@@ -75,9 +75,10 @@ fails fatally (revm's no-c-kzg stub; c-kzg is a C dependency that would break th
 
 ## Known gaps (the "system wrapper", not the execution core)
 
-1. **Heavy read views hit a per-node compute limit (`-1013`) — SOLVED with a raised-limit node
-   (live-verified 2026-06-11).** A local observer node (`testnet-node/`, synced to this testnet,
-   `read-compute-bandwidth-limit: 300M`) serves the previously-dead read path: real
+1. **Heavy read views hit a per-node compute limit (`-1013` at the node; surfaced as `-32005` to
+   your tooling) — SOLVED with a raised-limit node (live-verified 2026-06-11).** A local observer
+   node (a standard Koinos node synced to this testnet with `read-compute-bandwidth-limit: 300M`;
+   not committed to this repo) serves the previously-dead read path: real
    `eth_estimateGas` (1.2×-of-actual figures, fallback never fires), `QuoterV2.quoteExactInputSingle`,
    V2 `getAmountsOut`, NFPM `positions()` — all working through the proxy. On a DEFAULT public node
    the limit (10M) still bites and the proxy degrades gracefully (`ESTIMATE_GAS_FALLBACK`, `-32005`
@@ -118,7 +119,7 @@ fails fatally (revm's no-c-kzg stub; c-kzg is a C dependency that would break th
 
 | Milestone | Effort | Notes |
 |---|---|---|
-| **Raised-read-limit node** (own foundation-testnet node) | infra | Unblocks Quoter / `positions()` / `getAmountsOut` — the real "full functionality" unblock. Aligns with the in-progress single-binary Koinos node ("monolith"): once its block-sync lands, run one binary with the read-limit raised and point the proxy at it. |
+| **Raised-read-limit node** (own foundation-testnet node) | done (infra) | DONE + live-verified 2026-06-11 (see Known gap 1): a synced node with `read-compute-bandwidth-limit: 300M` unblocks Quoter / `positions()` / `getAmountsOut` through the proxy. It is per-node config, not consensus — anyone running such a node gets byte-identical answers. The remaining "effort" is purely operational (run/maintain the node), not new code. |
 | **Persistence + `eth_getLogs`** | ~done | Landed + live-verified: SQLite store, full account-history backfill indexer (LIB-aware), `eth_getLogs`, block-global `logIndex`, real `txIndex`, receipt + block blooms, populated block bodies, `eth_getBlockReceipts`. Remaining edge: reorg-dropped txs linger. |
 | **Fee-gated relay + key separation** | small/medium | Admission policy; split relay key from engine-upgrade authority (multisig/timelock). |
 | **Bridge + decentralized relay + economics** | large, org-backed | The genuinely hard, capital/trust-intensive part — not solo work. |

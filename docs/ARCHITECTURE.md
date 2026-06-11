@@ -15,7 +15,7 @@ is the EVM*, and a relayer pays the host-chain resource for users.
 | `engine.rs` | `handle_submit_raw_tx` (the committing tx path), `handle_call_view` (read-only), `emit_logs`, `emit_evm_result_event` |
 | `tx.rs` | RLP decode of legacy / EIP-155 / EIP-1559 txs + sender recovery (enforces low-s, chain id) |
 | `database.rs` | revm `Database`/`DatabaseCommit` backed by Koinos `get_object`/`put_object` |
-| `precompiles.rs` | `ecRecover`, SHA-256, RIPEMD-160, identity (0x01–0x04) — delegating to native Koinos crypto syscalls; 0x05–0x09 (modexp, bn254 add/mul/pairing, blake2f) are inherited from revm's Cancun set, present and compiled in (not yet vector-verified on-chain); 0x0a (KZG point evaluation) is absent |
+| `precompiles.rs` | `ecRecover`, SHA-256, RIPEMD-160, identity (0x01–0x04) — delegating to native Koinos crypto syscalls; 0x05–0x09 (modexp, bn254 add/mul/pairing, blake2f) are inherited from revm's Cancun set and vector-verified byte-exact on-chain (2026-06-10/11; see [STATUS.md](STATUS.md)); 0x0a (KZG point evaluation) is absent |
 | `state.rs` | object-space layout (accounts / code / storage / config / nonces) |
 | `koinos.rs` | syscall FFI; `call_system_must` aborts the tx if a state syscall fails |
 | `proto.rs` | minimal `no_std` protobuf codec |
@@ -37,9 +37,11 @@ default-skipping would otherwise drop `success=false` and make failures look suc
 
 ## 2. The proxy — `koinos-evm/rpc/`
 
-A ~1500-LOC Rust JSON-RPC server (axum). It accepts standard Ethereum JSON-RPC, and for writes it
+A ~6k-LOC Rust JSON-RPC server (axum). It accepts standard Ethereum JSON-RPC, and for writes it
 decodes the user's signed raw tx, re-wraps it as a Koinos `call_contract(engine, entry_point=7, raw_tx)`,
 signs that with the **operator** key, and submits it — paying Koinos mana so the EVM user pays nothing.
+Beyond the translation core it also runs a durable SQLite store, a history-backfill indexer, and a
+WebSocket push path (see the file table below).
 
 | File | Responsibility |
 |---|---|
@@ -106,13 +108,20 @@ artifacts and baked in as a hard on-chain assertion. See [TESTING.md](TESTING.md
 
 Intentional / intrinsic (documented, fine for Uniswap; relevant for some other protocols):
 
+- **Native value (`msg.value`) is unsupported.** No path mints native EVM balance, so `eth_getBalance`
+  is always `0` and any tx with `value > 0` reverts inside revm with insufficient funds (the value is
+  carried correctly — revm's balance check simply fails). Consequence: `payable` functions called with
+  `value == 0` work, but native-value paths (`swapExactETHForTokens`, WETH `deposit()` via value,
+  direct ETH transfers) do not. Pure-ERC-20 / token↔token protocols are unaffected.
 - `tx.gasprice`, `block.basefee`, `block.coinbase`, `block.difficulty` are **0**; `BLOCKHASH` returns 0.
 - EVM users pay **no gas** — the operator pays Koinos mana (zero-fee policy).
 - Koinos block time ≈ 3 s (vs 12 s) → timelocks fire ~4× faster; ~60-block finality lag.
 - Heavy read-only views can exceed the Koinos node's `read-compute-bandwidth-limit` (a per-node config,
-  default 10M) and revert `-1013`; see [STATUS.md](STATUS.md) (this is the single biggest usability gap).
+  default 10M): the Koinos node reports `-1013` and the proxy surfaces `-32005` to your tooling. A
+  raised-read-limit node serves these (live-verified, see [STATUS.md](STATUS.md)).
 - EIP-2930 access lists, EIP-4844 blobs, and EIP-7702 are rejected by the tx parser.
 - Precompile 0x0a (KZG point evaluation, EIP-4844) is unavailable (revm's stub without the c-kzg
-  backend — a C dependency that would break the MVP-WASM build); 0x05–0x09 (modexp, bn254
-  add/mul/pairing, blake2f) are active via revm's Cancun set, present and compiled in (not yet
-  vector-verified on-chain).
+  backend — a C dependency that would break the MVP-WASM build). 0x05–0x09 (modexp, bn254
+  add/mul/pairing, blake2f) are active via revm's Cancun set and **vector-verified byte-exact on-chain**
+  (2026-06-10/11; 0x08 pairing via the read path + a single committed pairing) — see
+  [STATUS.md](STATUS.md).
